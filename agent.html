@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>中介订单后台 - 家教平台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-page="agent">
+    <header class="topbar simple">
+      <div class="brand-block">
+        <strong>家教平台</strong>
+        <span>中介订单后台</span>
+      </div>
+      <a class="ghost-link" href="./index.html">返回入口</a>
+    </header>
+
+    <main>
+      <section class="agent-hero">
+        <p class="kicker">中介工作台</p>
+        <h1>录单、搜索和订单流程管理</h1>
+        <p>正式版会由后端数据库分页查询；当前原型先用本地数据模拟完整流程和权限边界。</p>
+      </section>
+
+      <section id="loginPanel" class="panel">
+        <div class="section-head">
+          <h2>中介登录</h2>
+        <span>演示中介：001 / 123456；管理员：admin / admin123</span>
+      </div>
+      <form id="loginForm" class="form compact-form">
+          <input name="account" required placeholder="登录账号 / 手机号" />
+          <input name="password" required type="password" placeholder="密码" />
+          <button class="primary" type="submit">登录中介后台</button>
+        </form>
+      </section>
+
+      <section id="agentWorkspace" class="hidden">
+        <nav class="agent-tabs" aria-label="中介后台功能">
+          <button class="agent-tab active" data-agent-tab="entry">订单录入</button>
+          <button class="agent-tab" data-agent-tab="manage">订单管理</button>
+          <button class="agent-tab" data-agent-tab="account">账号安全</button>
+        </nav>
+
+        <div class="agent-pages">
+          <section class="panel agent-page active" data-agent-page="entry">
+            <div class="section-head">
+              <h2>订单导入</h2>
+              <span>粘贴原文后自动识别，中介核对修改后再发布</span>
+            </div>
+            <textarea id="rawText" rows="8" placeholder="粘贴订单原文，例如：初二女生数学，雁塔区科技一路，每周2次，每次2小时，100元/小时，要求女老师..."></textarea>
+            <div class="actions">
+              <button id="parseBtn" class="primary">自动识别</button>
+              <button id="clearFormBtn">清空录入</button>
+            </div>
+            <div id="parseReview" class="parse-review hidden"></div>
+
+            <form id="orderForm" class="form">
+              <input name="orderNo" placeholder="订单号，不填则自动生成" />
+              <select name="studentGender">
+                <option value="女孩">女孩</option>
+                <option value="男孩">男孩</option>
+                <option value="未说明">未说明</option>
+              </select>
+              <input name="grade" list="gradeOptions" required placeholder="学生年级，例如：初二 / 高一 / 小升初" />
+              <input name="subject" list="subjectOptions" required placeholder="补习科目，例如：数学 / 英语 / 数学、物理" />
+              <input name="area" list="areaOptions" required placeholder="区域，例如：雁塔区 / 线上" />
+              <input name="score" required placeholder="现阶段成绩，例如：89 / 预科 / 基础薄弱" />
+              <input name="lessonTime" required placeholder="补习时间，例如：每周2次，每次2小时" />
+              <input name="price" required placeholder="报价，例如：100元/小时 / 200元两小时" />
+              <input name="address" required placeholder="地址，例如：科技一路花园印象" />
+              <select name="agentId" id="agentSelect"></select>
+              <input name="parentName" placeholder="家长称呼，仅后台可见" />
+              <input name="parentPhone" placeholder="家长电话，仅后台可见，可搜索" />
+              <input name="parentWechat" placeholder="家长微信，仅后台可见，可搜索" />
+              <textarea name="requirement" rows="4" placeholder="对老师要求，例如：女老师，初中数学经验丰富，有方法"></textarea>
+              <textarea name="internalNote" rows="3" placeholder="中介内部备注，例如：家长晚上回复、老师A已联系"></textarea>
+              <button class="primary wide" type="submit">确认发布到订单大厅</button>
+            </form>
+          </section>
+
+          <section class="panel agent-page" data-agent-page="manage">
+            <div class="section-head">
+              <h2>搜索与管理</h2>
+              <span id="staffStats"></span>
+            </div>
+            <div class="manage-search">
+              <input id="staffSearch" placeholder="搜索订单号、地址、年级、科目、家长信息、原始文本" />
+              <select id="staffStatus">
+                <option value="">全部处理中</option>
+                <option value="active">招募中</option>
+                <option value="paused">下架中</option>
+              </select>
+            </div>
+            <div id="staffList" class="order-list"></div>
+            <div id="staffEmpty" class="empty hidden">暂无匹配订单</div>
+            <nav id="staffPagination" class="pagination" aria-label="中介订单分页"></nav>
+          </section>
+
+          <section class="panel agent-page" data-agent-page="account">
+            <div class="section-head">
+              <h2>账号安全</h2>
+              <span id="currentAccount"></span>
+            </div>
+            <div class="actions">
+              <button id="logoutBtn">退出登录</button>
+            </div>
+            <form id="profileForm" class="form compact-form">
+              <input name="account" required placeholder="登录账号，可改成手机号" />
+              <input name="name" required placeholder="中介名称，例如：小慕老师" />
+              <input name="wechat" required placeholder="中介微信" />
+              <input name="phone" placeholder="手机号" />
+              <input name="password" type="password" placeholder="新密码，不改可留空" />
+              <button class="primary" type="submit">保存我的账号</button>
+            </form>
+            <section id="adminAccountPanel" class="account-backup hidden">
+              <div class="section-head">
+                <h3>管理员账号管理</h3>
+                <span>管理员只负责生成中介账号和重置密码，不能录入订单</span>
+              </div>
+              <form id="agentForm" class="form compact-form">
+                <input name="name" required placeholder="中介名称，可先填待完善" />
+                <input name="wechat" placeholder="中介微信，可让中介登录后补" />
+                <input name="phone" placeholder="手机号，可选" />
+                <button class="primary" type="submit">生成中介账号</button>
+              </form>
+              <div id="agentList" class="agent-list"></div>
+            </section>
+            <div class="account-backup">
+              <div class="section-head">
+                <h3>数据备份</h3>
+                <span>正式版会备份数据库；当前原型导出本地 JSON</span>
+              </div>
+              <div class="actions">
+                <button id="exportBtn">导出数据</button>
+                <label class="file-button">导入数据<input id="importInput" type="file" accept="application/json" /></label>
+                <button id="resetBtn" class="danger">清空演示数据</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <datalist id="gradeOptions"></datalist>
+    <datalist id="subjectOptions"></datalist>
+    <datalist id="areaOptions"></datalist>
+    <div id="toast" class="toast hidden"></div>
+    <script src="./platform-core.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
