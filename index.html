@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>老师订单大厅 - 家教平台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-page="teacher">
+    <header class="topbar simple">
+      <div class="brand-block">
+        <strong>家教平台</strong>
+        <span>老师订单大厅</span>
+      </div>
+    </header>
+
+    <main class="teacher-shell">
+      <section class="welcome-band">
+        <div class="info-icon">i</div>
+        <div>
+          <h1>家教平台欢迎大家接单！</h1>
+          <p>老师端只展示可接单订单。复制订单号和中介微信后，直接联系中介确认。</p>
+        </div>
+      </section>
+
+      <section class="teacher-filters">
+        <div class="filter-menu" data-filter="grade">
+          <button type="button" class="filter-toggle" data-filter-toggle="grade">年级</button>
+          <div class="filter-options" id="teacherGradeOptions"></div>
+        </div>
+        <div class="filter-menu" data-filter="subject">
+          <button type="button" class="filter-toggle" data-filter-toggle="subject">科目</button>
+          <div class="filter-options" id="teacherSubjectOptions"></div>
+        </div>
+        <div class="filter-menu" data-filter="area">
+          <button type="button" class="filter-toggle" data-filter-toggle="area">区域</button>
+          <div class="filter-options" id="teacherAreaOptions"></div>
+        </div>
+        <input id="teacherSearch" placeholder="搜索订单号、地址、要求" />
+      </section>
+
+      <div id="activeChips" class="chips"></div>
+      <div id="teacherList" class="order-list"></div>
+      <div id="teacherEmpty" class="empty hidden">暂无可接订单</div>
+      <nav id="teacherPagination" class="pagination" aria-label="老师订单分页"></nav>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="./platform-core.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
