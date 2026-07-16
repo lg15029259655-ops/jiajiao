@@ -17,7 +17,10 @@ function sanitizeAgent(agent) {
 }
 
 function resolveAllowedOrigin(env = process.env) {
-  return env.APP_ORIGIN || env.RENDER_EXTERNAL_URL;
+  if (env.APP_ORIGIN) return env.APP_ORIGIN;
+  if (env.RENDER_EXTERNAL_URL) return env.RENDER_EXTERNAL_URL;
+  if (env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  return undefined;
 }
 
 function buildApp({ repository, serveFiles = true, production = process.env.NODE_ENV === "production", allowedOrigin = resolveAllowedOrigin() } = {}) {

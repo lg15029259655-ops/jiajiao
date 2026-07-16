@@ -32,3 +32,10 @@ test("explicit APP_ORIGIN takes precedence over the hosting URL", () => {
     "https://orders.example.com"
   );
 });
+
+test("Vercel production URL is converted to a trusted HTTPS origin", () => {
+  assert.equal(
+    resolveAllowedOrigin({ VERCEL_PROJECT_PRODUCTION_URL: "jiajiao.vercel.app" }),
+    "https://jiajiao.vercel.app"
+  );
+});
