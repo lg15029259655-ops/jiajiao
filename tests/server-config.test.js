@@ -2,8 +2,9 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const packageJson = require("../package.json");
+const appModule = require("../src/app.js");
 const { resolveHost } = require("../server.js");
-const { resolveAllowedOrigin } = require("../src/app.js");
+const { resolveAllowedOrigin } = appModule;
 
 test("cloud runtime is pinned to Node 24 for ESM dependency compatibility", () => {
   assert.equal(packageJson.engines.node, "24.x");
@@ -11,6 +12,11 @@ test("cloud runtime is pinned to Node 24 for ESM dependency compatibility", () =
 
 test("Fastify cookie plugin is pinned before its ESM-only transitive upgrade", () => {
   assert.equal(packageJson.dependencies["@fastify/cookie"], "11.0.2");
+});
+
+test("Vercel entry module has a callable default export", () => {
+  assert.equal(typeof appModule, "function");
+  assert.equal(typeof appModule.buildApp, "function");
 });
 
 test("local server defaults to loopback", () => {

@@ -285,4 +285,34 @@ function csvCell(value) {
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-module.exports = { buildApp, createTemporaryPassword, csvCell, requireVersion, resolveAllowedOrigin, sanitizeAgent };
+let vercelAppPromise;
+
+function loadVercelApp() {
+  if (!vercelAppPromise) {
+    vercelAppPromise = (async () => {
+      if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required");
+      const { createPool } = require("./database.js");
+      const { createRepository } = require("./repository.js");
+      const repository = createRepository(createPool(process.env.DATABASE_URL));
+      const app = buildApp({ repository });
+      await app.ready();
+      return app;
+    })().catch((error) => {
+      vercelAppPromise = undefined;
+      throw error;
+    });
+  }
+  return vercelAppPromise;
+}
+
+async function handleVercelRequest(request, response) {
+  const app = await loadVercelApp();
+  await new Promise((resolve, reject) => {
+    response.once("finish", resolve);
+    response.once("error", reject);
+    app.server.emit("request", request, response);
+  });
+}
+
+module.exports = handleVercelRequest;
+Object.assign(module.exports, { buildApp, createTemporaryPassword, csvCell, requireVersion, resolveAllowedOrigin, sanitizeAgent });
