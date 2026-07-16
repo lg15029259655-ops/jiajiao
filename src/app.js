@@ -1,9 +1,9 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 const Fastify = require("fastify");
 const cookie = require("@fastify/cookie");
 const rateLimit = require("@fastify/rate-limit");
-const staticFiles = require("@fastify/static");
 const multipart = require("@fastify/multipart");
 const { needsPasswordUpgrade, hashPassword, sessionToken, tokenDigest, verifyPassword } = require("./security.js");
 const { domainError, publicOrder } = require("./domain.js");
@@ -27,13 +27,11 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
   if (!repository) throw new Error("repository is required");
   const app = Fastify({ logger: false, trustProxy: production, requestIdHeader: "x-request-id", bodyLimit: MAX_IMPORT_BYTES });
   const cookieName = production ? "__Host-tutor-session" : "tutor-session";
+  const publicFiles = serveFiles ? loadPublicFiles() : undefined;
 
   app.register(cookie);
   app.register(rateLimit, { global: false });
   app.register(multipart, { limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 5 } });
-  if (serveFiles) {
-    app.register(staticFiles, { root: path.join(__dirname, ".."), serve: false });
-  }
 
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("x-content-type-options", "nosniff");
@@ -254,10 +252,12 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
   });
 
   if (serveFiles) {
-    app.get("/", async (_request, reply) => reply.sendFile("teacher.html"));
-    app.get("/teacher.html", async (_request, reply) => reply.sendFile("teacher.html"));
-    app.get("/agent.html", async (_request, reply) => reply.sendFile("agent.html"));
-    for (const file of ["app.js", "platform-core.js", "styles.css"]) app.get(`/${file}`, async (_request, reply) => reply.sendFile(file));
+    app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.teacherHtml));
+    app.get("/teacher.html", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.teacherHtml));
+    app.get("/agent.html", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.agentHtml));
+    app.get("/app.js", async (_request, reply) => reply.type("application/javascript; charset=utf-8").send(publicFiles.appScript));
+    app.get("/platform-core.js", async (_request, reply) => reply.type("application/javascript; charset=utf-8").send(publicFiles.platformCore));
+    app.get("/styles.css", async (_request, reply) => reply.type("text/css; charset=utf-8").send(publicFiles.styles));
   }
 
   app.addHook("onClose", async () => repository.close?.());
@@ -283,6 +283,16 @@ function csvCell(value) {
   const text = String(value ?? "");
   const safe = /^[=+\-@]/.test(text.trimStart()) ? `'${text}` : text;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+function loadPublicFiles() {
+  return {
+    teacherHtml: fs.readFileSync(path.join(__dirname, "..", "teacher.html"), "utf8"),
+    agentHtml: fs.readFileSync(path.join(__dirname, "..", "agent.html"), "utf8"),
+    appScript: fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8"),
+    platformCore: fs.readFileSync(path.join(__dirname, "..", "platform-core.js"), "utf8"),
+    styles: fs.readFileSync(path.join(__dirname, "..", "styles.css"), "utf8")
+  };
 }
 
 let vercelAppPromise;
@@ -315,4 +325,4 @@ async function handleVercelRequest(request, response) {
 }
 
 module.exports = handleVercelRequest;
-Object.assign(module.exports, { buildApp, createTemporaryPassword, csvCell, requireVersion, resolveAllowedOrigin, sanitizeAgent });
+Object.assign(module.exports, { buildApp, createTemporaryPassword, csvCell, loadPublicFiles, requireVersion, resolveAllowedOrigin, sanitizeAgent });

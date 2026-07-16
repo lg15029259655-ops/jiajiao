@@ -19,6 +19,15 @@ test("Vercel entry module has a callable default export", () => {
   assert.equal(typeof appModule.buildApp, "function");
 });
 
+test("Vercel bundle explicitly loads the public frontend assets", () => {
+  const files = appModule.loadPublicFiles();
+  assert.match(files.teacherHtml, /<!doctype html>/i);
+  assert.match(files.agentHtml, /<!doctype html>/i);
+  assert.match(files.styles, /body\s*\{/i);
+  assert.ok(files.appScript.length > 0);
+  assert.ok(files.platformCore.length > 0);
+});
+
 test("local server defaults to loopback", () => {
   assert.equal(resolveHost({}), "127.0.0.1");
 });
