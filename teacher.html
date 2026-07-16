@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>老师订单大厅 - 家教平台</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=stability-1" />
   </head>
-  <body data-page="teacher">
+  <body data-page="teacher" data-mode="api">
     <header class="topbar simple">
       <div class="brand-block">
         <strong>家教平台</strong>
@@ -40,13 +40,13 @@
       </section>
 
       <div id="activeChips" class="chips"></div>
-      <div id="teacherList" class="order-list"></div>
+      <div id="teacherList" class="order-list" aria-live="polite"></div>
       <div id="teacherEmpty" class="empty hidden">暂无可接订单</div>
       <nav id="teacherPagination" class="pagination" aria-label="老师订单分页"></nav>
     </main>
 
     <div id="toast" class="toast hidden"></div>
-    <script src="./platform-core.js"></script>
-    <script src="./app.js"></script>
+    <script src="./platform-core.js?v=stability-1"></script>
+    <script src="./app.js?v=stability-1"></script>
   </body>
 </html>

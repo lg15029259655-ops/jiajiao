@@ -1,0 +1,27 @@
+{
+  "name": "tutor-platform",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test app.test.js tests/*.test.js",
+    "test:integration": "set RUN_DB_INTEGRATION=1&& node --test tests/database.integration.test.js",
+    "db:migrate": "node db/migrate.js",
+    "db:anonymize": "node db/maintenance.js",
+    "db:backup": "node db/backup.js",
+    "db:restore": "node db/restore.js --dry-run"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/multipart": "^9.2.1",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^8.2.0",
+    "csv-parse": "^7.0.1",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.6.2",
+    "pg": "^8.16.3"
+  }
+}

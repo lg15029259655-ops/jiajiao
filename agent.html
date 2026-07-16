@@ -3,29 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>中介订单后台 - 家教平台</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <title>中介专用后台 - 家教平台</title>
+    <link rel="stylesheet" href="./styles.css?v=stability-1" />
   </head>
-  <body data-page="agent">
+  <body data-page="agent" data-mode="api">
     <header class="topbar simple">
       <div class="brand-block">
         <strong>家教平台</strong>
-        <span>中介订单后台</span>
+        <span>中介专用后台</span>
       </div>
-      <a class="ghost-link" href="./index.html">返回入口</a>
     </header>
 
     <main>
       <section class="agent-hero">
-        <p class="kicker">中介工作台</p>
+        <p class="kicker">内部工作台</p>
         <h1>录单、搜索和订单流程管理</h1>
-        <p>正式版会由后端数据库分页查询；当前原型先用本地数据模拟完整流程和权限边界。</p>
+        <p>此页面只给中介和管理员使用；老师端使用独立订单大厅链接。</p>
       </section>
 
       <section id="loginPanel" class="panel">
         <div class="section-head">
           <h2>中介登录</h2>
-        <span>演示中介：001 / 123456；管理员：admin / admin123</span>
+        <span>请输入管理员分配的账号和密码</span>
       </div>
       <form id="loginForm" class="form compact-form">
           <input name="account" required placeholder="登录账号 / 手机号" />
@@ -37,6 +36,7 @@
       <section id="agentWorkspace" class="hidden">
         <nav class="agent-tabs" aria-label="中介后台功能">
           <button class="agent-tab active" data-agent-tab="entry">订单录入</button>
+          <button class="agent-tab" data-agent-tab="review">待审核</button>
           <button class="agent-tab" data-agent-tab="manage">订单管理</button>
           <button class="agent-tab" data-agent-tab="account">账号安全</button>
         </nav>
@@ -61,7 +61,7 @@
                 <option value="男孩">男孩</option>
                 <option value="未说明">未说明</option>
               </select>
-              <input name="grade" list="gradeOptions" required placeholder="学生年级，例如：初二 / 高一 / 小升初" />
+              <input name="grade" list="gradeOptions" required placeholder="学生年级，例如：初二 / 高一 / 五年级" />
               <input name="subject" list="subjectOptions" required placeholder="补习科目，例如：数学 / 英语 / 数学、物理" />
               <input name="area" list="areaOptions" required placeholder="区域，例如：雁塔区 / 线上" />
               <input name="score" required placeholder="现阶段成绩，例如：89 / 预科 / 基础薄弱" />
@@ -78,6 +78,23 @@
             </form>
           </section>
 
+          <section class="panel agent-page" data-agent-page="review">
+            <div class="section-head">
+              <h2>待审核导入</h2>
+              <span id="reviewStats">表格或微信文本导入后，先在这里轻审核</span>
+            </div>
+            <textarea id="batchImportText" rows="6" placeholder="批量粘贴微信订单文本；每条订单之间空一行。字段完整的会进入可批量发布，缺字段或疑似重复的进入需要处理。"></textarea>
+            <div class="actions">
+              <button id="batchImportBtn" class="primary">导入到待审核</button>
+              <label class="file-button">选择CSV / Excel<input id="batchImportFile" type="file" accept=".csv,.xlsx" /></label>
+              <button id="publishReadyBtn" class="success">发布可通过项</button>
+              <button id="exportImportErrorsBtn">导出错误行</button>
+            </div>
+            <div id="reviewList" class="order-list"></div>
+            <div id="reviewEmpty" class="empty hidden">暂无待审核订单</div>
+            <nav id="reviewPagination" class="pagination" aria-label="待审核订单分页"></nav>
+          </section>
+
           <section class="panel agent-page" data-agent-page="manage">
             <div class="section-head">
               <h2>搜索与管理</h2>
@@ -85,13 +102,20 @@
             </div>
             <div class="manage-search">
               <input id="staffSearch" placeholder="搜索订单号、地址、年级、科目、家长信息、原始文本" />
+              <select id="staffScope">
+                <option value="working">处理中</option>
+                <option value="history">历史（只读）</option>
+              </select>
               <select id="staffStatus">
-                <option value="">全部处理中</option>
+                <option value="">全部状态</option>
                 <option value="active">招募中</option>
-                <option value="paused">下架中</option>
+                <option value="paused">锁单沟通</option>
+                <option value="completed">试课成功</option>
+                <option value="cancelled">家长取消</option>
+                <option value="deleted">无效/删除</option>
               </select>
             </div>
-            <div id="staffList" class="order-list"></div>
+            <div id="staffList" class="order-list" aria-live="polite"></div>
             <div id="staffEmpty" class="empty hidden">暂无匹配订单</div>
             <nav id="staffPagination" class="pagination" aria-label="中介订单分页"></nav>
           </section>
@@ -107,9 +131,9 @@
             <form id="profileForm" class="form compact-form">
               <input name="account" required placeholder="登录账号，可改成手机号" />
               <input name="name" required placeholder="中介名称，例如：小慕老师" />
-              <input name="wechat" required placeholder="中介微信" />
+              <input name="wechat" placeholder="中介微信（中介账号必填）" />
               <input name="phone" placeholder="手机号" />
-              <input name="password" type="password" placeholder="新密码，不改可留空" />
+              <input name="password" type="password" minlength="10" placeholder="新密码，至少10位；不改可留空" />
               <button class="primary" type="submit">保存我的账号</button>
             </form>
             <section id="adminAccountPanel" class="account-backup hidden">
@@ -125,17 +149,6 @@
               </form>
               <div id="agentList" class="agent-list"></div>
             </section>
-            <div class="account-backup">
-              <div class="section-head">
-                <h3>数据备份</h3>
-                <span>正式版会备份数据库；当前原型导出本地 JSON</span>
-              </div>
-              <div class="actions">
-                <button id="exportBtn">导出数据</button>
-                <label class="file-button">导入数据<input id="importInput" type="file" accept="application/json" /></label>
-                <button id="resetBtn" class="danger">清空演示数据</button>
-              </div>
-            </div>
           </section>
         </div>
       </section>
@@ -145,7 +158,7 @@
     <datalist id="subjectOptions"></datalist>
     <datalist id="areaOptions"></datalist>
     <div id="toast" class="toast hidden"></div>
-    <script src="./platform-core.js"></script>
-    <script src="./app.js"></script>
+    <script src="./platform-core.js?v=stability-1"></script>
+    <script src="./app.js?v=stability-1"></script>
   </body>
 </html>

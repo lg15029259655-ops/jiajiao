@@ -1,0 +1,34 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const { resolveHost } = require("../server.js");
+const { resolveAllowedOrigin } = require("../src/app.js");
+
+test("local server defaults to loopback", () => {
+  assert.equal(resolveHost({}), "127.0.0.1");
+});
+
+test("production server defaults to all network interfaces", () => {
+  assert.equal(resolveHost({ NODE_ENV: "production" }), "0.0.0.0");
+});
+
+test("explicit HOST overrides the environment default", () => {
+  assert.equal(resolveHost({ NODE_ENV: "production", HOST: "10.0.0.8" }), "10.0.0.8");
+});
+
+test("Render public URL is used as the trusted origin automatically", () => {
+  assert.equal(
+    resolveAllowedOrigin({ RENDER_EXTERNAL_URL: "https://jiajiao-platform.onrender.com" }),
+    "https://jiajiao-platform.onrender.com"
+  );
+});
+
+test("explicit APP_ORIGIN takes precedence over the hosting URL", () => {
+  assert.equal(
+    resolveAllowedOrigin({
+      APP_ORIGIN: "https://orders.example.com",
+      RENDER_EXTERNAL_URL: "https://jiajiao-platform.onrender.com"
+    }),
+    "https://orders.example.com"
+  );
+});

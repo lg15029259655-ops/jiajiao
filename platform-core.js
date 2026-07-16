@@ -10,10 +10,10 @@
 
   const FILTERS = {
     grades: [
-      "小学", "一年级", "二年级", "三年级", "四年级", "五年级", "六年级", "小升初",
-      "初中", "预初", "初一", "初二", "初三",
-      "高中", "高一", "高二", "高三",
-      "成人", "其他"
+      "一年级", "二年级", "三年级", "四年级", "五年级", "六年级",
+      "初一", "初二", "初三",
+      "高一", "高二", "高三",
+      "其他"
     ],
     subjects: ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "政治", "全科", "其他"],
     areas: [
@@ -25,11 +25,15 @@
 
   const STATUS_TEXT = {
     active: "招募中",
-    paused: "暂时下架",
+    paused: "锁单沟通",
     completed: "试课成功",
     cancelled: "家长取消",
-    deleted: "已删除"
+    deleted: "无效/删除",
+    pending_review: "待审核"
   };
+
+  const WORKING_STATUSES = ["active", "paused"];
+  const TERMINAL_STATUSES = ["completed", "cancelled", "deleted"];
 
   const REASON_OPTIONS = {
     paused: ["大学生已交信息费", "已有老师联系", "正在沟通", "等待试课", "其他"],
@@ -52,13 +56,18 @@
   const STAFF_ACTIONS = {
     active: [
       { status: "paused", label: "暂时下架", tone: "warning" },
+      { status: "cancelled", label: "家长取消", tone: "warning subtle" },
       { status: "deleted", label: "删除订单", tone: "danger subtle" }
     ],
     paused: [
       { status: "active", label: "取消下架", tone: "success" },
       { status: "completed", label: "试课成功", tone: "success" },
+      { status: "cancelled", label: "家长取消", tone: "warning subtle" },
       { status: "deleted", label: "删除订单", tone: "danger subtle" }
-    ]
+    ],
+    completed: [],
+    cancelled: [],
+    deleted: []
   };
 
   function getTeacherOrders(orders) {
@@ -66,7 +75,15 @@
   }
 
   function getStaffOrders(orders) {
-    return orders.filter((order) => order.status === "active" || order.status === "paused");
+    return orders.filter((order) => WORKING_STATUSES.includes(order.status));
+  }
+
+  function getArchivedOrders(orders) {
+    return orders.filter((order) => TERMINAL_STATUSES.includes(order.status));
+  }
+
+  function getReviewOrders(orders) {
+    return orders.filter((order) => order.status === "pending_review");
   }
 
   function queryTeacherOrders(orders, options = {}) {
@@ -80,6 +97,28 @@
     const status = String(options.status || "").trim();
     const filtered = getStaffOrders(orders).filter((order) => {
       const statusOk = !status || order.status === status;
+      const keywordOk = !keyword || keywordMatch(searchText(order, true), keyword);
+      return statusOk && keywordOk;
+    });
+    return paginate(filtered, options.page, options.pageSize || PAGE_SIZE.staff);
+  }
+
+  function queryArchivedOrders(orders, options = {}) {
+    const keyword = String(options.keyword || "").trim();
+    const status = String(options.status || "").trim();
+    const filtered = getArchivedOrders(orders).filter((order) => {
+      const statusOk = !status || order.status === status;
+      const keywordOk = !keyword || keywordMatch(searchText(order, true), keyword);
+      return statusOk && keywordOk;
+    });
+    return paginate(filtered, options.page, options.pageSize || PAGE_SIZE.staff);
+  }
+
+  function queryReviewOrders(orders, options = {}) {
+    const keyword = String(options.keyword || "").trim();
+    const reviewStatus = String(options.reviewStatus || "").trim();
+    const filtered = getReviewOrders(orders).filter((order) => {
+      const statusOk = !reviewStatus || order.reviewStatus === reviewStatus;
       const keywordOk = !keyword || keywordMatch(searchText(order, true), keyword);
       return statusOk && keywordOk;
     });
@@ -127,6 +166,7 @@
       parts.push(
         order.parentName, order.parentPhone, order.parentWechat, order.internalNote,
         order.rawText, STATUS_TEXT[order.status], order.assignedTeacherContact
+        , order.reviewStatus, order.importWarnings
       );
     }
     return parts.filter(Boolean).join(" ");
@@ -260,9 +300,6 @@
   function matchesGrade(value, picked) {
     if (!picked) return true;
     if (includesLoose(value, picked)) return true;
-    if (picked === "小学") return /小学|一年级|二年级|三年级|四年级|五年级|六年级|小升初/.test(value);
-    if (picked === "初中") return /初|预初/.test(value);
-    if (picked === "高中") return /高/.test(value);
     return false;
   }
 
@@ -334,9 +371,13 @@
     REQUIRED_ORDER_FIELDS,
     STAFF_ACTIONS,
     STATUS_TEXT,
+    TERMINAL_STATUSES,
+    WORKING_STATUSES,
     findDuplicateWarnings,
     canEnterOrders,
     canManageAgents,
+    getArchivedOrders,
+    getReviewOrders,
     getStaffOrders,
     getTeacherOrders,
     keywordMatch,
@@ -346,6 +387,8 @@
     paginate,
     parseOrderText,
     publicOrder,
+    queryArchivedOrders,
+    queryReviewOrders,
     queryStaffOrders,
     queryTeacherOrders,
     searchText

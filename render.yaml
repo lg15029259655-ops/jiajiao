@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: jiajiao-platform
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: pnpm start
+    healthCheckPath: /health/ready
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_POOL_URL
+        sync: false
+      - key: DATABASE_DIRECT_URL
+        sync: false
+      - key: BACKUP_ENCRYPTION_KEY
+        generateValue: true
