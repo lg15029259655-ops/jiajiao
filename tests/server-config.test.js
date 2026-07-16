@@ -9,6 +9,10 @@ test("cloud runtime is pinned to Node 24 for ESM dependency compatibility", () =
   assert.equal(packageJson.engines.node, "24.x");
 });
 
+test("Fastify cookie plugin is pinned before its ESM-only transitive upgrade", () => {
+  assert.equal(packageJson.dependencies["@fastify/cookie"], "11.0.2");
+});
+
 test("local server defaults to loopback", () => {
   assert.equal(resolveHost({}), "127.0.0.1");
 });
