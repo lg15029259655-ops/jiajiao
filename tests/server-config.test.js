@@ -1,8 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+const packageJson = require("../package.json");
 const { resolveHost } = require("../server.js");
 const { resolveAllowedOrigin } = require("../src/app.js");
+
+test("cloud runtime is pinned to Node 24 for ESM dependency compatibility", () => {
+  assert.equal(packageJson.engines.node, "24.x");
+});
 
 test("local server defaults to loopback", () => {
   assert.equal(resolveHost({}), "127.0.0.1");
