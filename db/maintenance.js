@@ -1,4 +1,5 @@
 const { createPool } = require("../src/database.js");
+const { loadEnvFile } = require("./neon.js");
 
 async function runMaintenance(pool, now = new Date()) {
   const anonymized = await pool.query(`UPDATE orders SET
@@ -15,11 +16,27 @@ async function runMaintenance(pool, now = new Date()) {
         SELECT id FROM orders
         WHERE status IN ('completed', 'cancelled', 'deleted') AND anonymized_at IS NOT NULL
       )`);
+  const importItems = await pool.query(`UPDATE import_items SET
+      raw_text = NULL,
+      parsed_data = parsed_data - ARRAY['parentName','parentPhone','parentWechat','internalNote','rawText'],
+      field_sources = field_sources - ARRAY['parentName','parentPhone','parentWechat','internalNote','rawText'],
+      updated_at = $1
+    WHERE published_order_id IN (
+      SELECT id FROM orders
+      WHERE status IN ('completed', 'cancelled', 'deleted') AND anonymized_at IS NOT NULL
+    )
+      AND (raw_text IS NOT NULL OR parsed_data ?| ARRAY['parentName','parentPhone','parentWechat','internalNote','rawText'])`, [now]);
   const sessions = await pool.query("DELETE FROM sessions WHERE expires_at <= $1", [now]);
-  return { anonymizedOrders: anonymized.rowCount, scrubbedAuditLogs: auditLogs.rowCount, deletedSessions: sessions.rowCount };
+  return {
+    anonymizedOrders: anonymized.rowCount,
+    scrubbedAuditLogs: auditLogs.rowCount,
+    scrubbedImportItems: importItems.rowCount,
+    deletedSessions: sessions.rowCount
+  };
 }
 
 async function main() {
+  loadEnvFile();
   const connectionString = process.env.DATABASE_DIRECT_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_DIRECT_URL or DATABASE_URL is required");
   const pool = createPool(connectionString, { pooled: false });

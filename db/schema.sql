@@ -35,16 +35,24 @@ CREATE TABLE IF NOT EXISTS orders (
   subject TEXT NOT NULL,
   score TEXT,
   lesson_time TEXT NOT NULL,
+  start_time_text TEXT,
+  lesson_frequency TEXT,
+  lesson_duration TEXT,
   price TEXT NOT NULL,
   area TEXT NOT NULL,
   address TEXT NOT NULL,
   teacher_requirement TEXT,
+  teacher_gender_requirement TEXT,
+  teacher_education_requirement TEXT,
   parent_name TEXT,
   parent_phone TEXT,
   parent_wechat TEXT,
   internal_note TEXT,
   raw_text TEXT,
   assigned_teacher_contact TEXT,
+  locked_by_agent_id UUID REFERENCES agents(id),
+  locked_at TIMESTAMPTZ,
+  lock_follow_up_at TIMESTAMPTZ,
   agent_id UUID REFERENCES agents(id),
   status TEXT NOT NULL DEFAULT 'active'
     CHECK (status IN ('active', 'paused', 'completed', 'cancelled', 'deleted')),
@@ -81,6 +89,12 @@ CREATE TABLE IF NOT EXISTS import_batches (
   ready_count INTEGER NOT NULL DEFAULT 0,
   needs_review_count INTEGER NOT NULL DEFAULT 0,
   published_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'reviewing'
+    CHECK (status IN ('queued', 'processing', 'reviewing', 'publishing', 'completed', 'failed')),
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  last_processed_row INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

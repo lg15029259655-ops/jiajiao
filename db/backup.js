@@ -2,6 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createPool } = require("../src/database.js");
 const { encryptBackup } = require("./backup-format.js");
+const { loadEnvFile } = require("./neon.js");
 
 const TABLES = ["agents", "agent_profile_history", "import_batches", "orders", "import_items", "order_logs", "sessions", "order_sequences", "schema_migrations"];
 
@@ -25,6 +26,7 @@ async function createBackup(pool) {
 }
 
 async function main() {
+  loadEnvFile();
   const connectionString = process.env.DATABASE_DIRECT_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_DIRECT_URL or DATABASE_URL is required");
   if (!process.env.BACKUP_ENCRYPTION_KEY) throw new Error("BACKUP_ENCRYPTION_KEY is required");

@@ -66,12 +66,17 @@
               <input name="area" list="areaOptions" required placeholder="区域，例如：雁塔区 / 线上" />
               <input name="score" required placeholder="现阶段成绩，例如：89 / 预科 / 基础薄弱" />
               <input name="lessonTime" required placeholder="补习时间，例如：每周2次，每次2小时" />
+              <input name="startTimeText" placeholder="开始时间，例如：7月中旬 / 随时开始" />
+              <input name="lessonFrequency" placeholder="教学频率，例如：每周2次" />
+              <input name="lessonDuration" placeholder="每次时长，例如：2小时" />
               <input name="price" required placeholder="报价，例如：100元/小时 / 200元两小时" />
               <input name="address" required placeholder="地址，例如：科技一路花园印象" />
               <select name="agentId" id="agentSelect"></select>
               <input name="parentName" placeholder="家长称呼，仅后台可见" />
               <input name="parentPhone" placeholder="家长电话，仅后台可见，可搜索" />
               <input name="parentWechat" placeholder="家长微信，仅后台可见，可搜索" />
+              <input name="teacherGenderRequirement" placeholder="老师性别要求，例如：女 / 不限" />
+              <input name="teacherEducationRequirement" placeholder="学历要求，例如：大学生 / 985优先" />
               <textarea name="requirement" rows="4" placeholder="对老师要求，例如：女老师，初中数学经验丰富，有方法"></textarea>
               <textarea name="internalNote" rows="3" placeholder="中介内部备注，例如：家长晚上回复、老师A已联系"></textarea>
               <button class="primary wide" type="submit">确认发布到订单大厅</button>
@@ -89,6 +94,14 @@
               <label class="file-button">选择CSV / Excel<input id="batchImportFile" type="file" accept=".csv,.xlsx" /></label>
               <button id="publishReadyBtn" class="success">发布可通过项</button>
               <button id="exportImportErrorsBtn">导出错误行</button>
+            </div>
+            <div class="review-filters">
+              <input id="reviewSearch" placeholder="搜索编号、地址、年级、科目" />
+              <select id="reviewStatus">
+                <option value="">全部审核结果</option>
+                <option value="ready">可发布</option>
+                <option value="needs_review">需要处理</option>
+              </select>
             </div>
             <div id="reviewList" class="order-list"></div>
             <div id="reviewEmpty" class="empty hidden">暂无待审核订单</div>
@@ -113,6 +126,12 @@
                 <option value="completed">试课成功</option>
                 <option value="cancelled">家长取消</option>
                 <option value="deleted">无效/删除</option>
+              </select>
+              <select id="staffFollowup">
+                <option value="">全部跟进状态</option>
+                <option value="lockOverdue">锁单超过24小时</option>
+                <option value="stale7">招募超过7天未更新</option>
+                <option value="stale14">招募超过14天未更新</option>
               </select>
             </div>
             <div id="staffList" class="order-list" aria-live="polite"></div>

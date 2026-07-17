@@ -2,7 +2,6 @@ const { ACTIVE_STATUSES, HISTORY_STATUSES, assertTransition, domainError } = req
 const crypto = require("node:crypto");
 const { transaction, withTransientRetry } = require("./database.js");
 const { validateImportItem } = require("./imports.js");
-const { findDuplicateWarnings: findInBatchDuplicateWarnings } = require("../platform-core.js");
 
 const PAGE_SIZE = 10;
 const SENSITIVE_AUDIT_FIELDS = new Set(["parentName", "parentPhone", "parentWechat", "internalNote", "rawText", "assignedTeacherContact"]);
@@ -45,7 +44,9 @@ function buildTeacherOrderQuery(options = {}) {
   values.push((normalizePage(options.page) - 1) * PAGE_SIZE);
   return {
     text: `SELECT o.id, o.order_no, o.status, o.student_gender, o.grade, o.subject, o.score,
-      o.lesson_time, o.price, o.area, o.address, o.teacher_requirement, o.created_at, o.updated_at,
+      o.lesson_time, o.start_time_text, o.lesson_frequency, o.lesson_duration,
+      o.price, o.area, o.address, o.teacher_requirement, o.teacher_gender_requirement,
+      o.teacher_education_requirement, o.created_at, o.updated_at,
       a.display_name AS agent_name, a.wechat AS agent_wechat, COUNT(*) OVER() AS total_count
       FROM orders o LEFT JOIN agents a ON a.id = o.agent_id
       WHERE ${where.join(" AND ")}
@@ -62,6 +63,13 @@ function buildAgentOrderQuery(options = {}) {
   if (options.status && scopeStatuses.includes(options.status)) {
     values.push(options.status);
     where.push(`o.status = $${values.length}`);
+  }
+  if (options.followup === "lockOverdue") {
+    where.push("o.status = 'paused' AND o.lock_follow_up_at <= now()");
+  } else if (options.followup === "stale7") {
+    where.push("o.status = 'active' AND o.updated_at <= now() - interval '7 days'");
+  } else if (options.followup === "stale14") {
+    where.push("o.status = 'active' AND o.updated_at <= now() - interval '14 days'");
   }
   if (String(options.keyword || "").trim()) {
     values.push(`%${String(options.keyword).trim()}%`);
@@ -91,20 +99,38 @@ function mapAgent(row) {
 function mapOrder(row) {
   return {
     id: row.id, orderNo: row.order_no, studentGender: row.student_gender || "", grade: row.grade || "",
-    subject: row.subject || "", score: row.score || "", lessonTime: row.lesson_time || "", price: row.price || "",
+    subject: row.subject || "", score: row.score || "", lessonTime: row.lesson_time || "",
+    startTimeText: row.start_time_text || "", lessonFrequency: row.lesson_frequency || "", lessonDuration: row.lesson_duration || "",
+    price: row.price || "",
     area: row.area || "", address: row.address || "", requirement: row.teacher_requirement || "",
+    teacherGenderRequirement: row.teacher_gender_requirement || "",
+    teacherEducationRequirement: row.teacher_education_requirement || "",
     parentName: row.parent_name || "", parentPhone: row.parent_phone || "", parentWechat: row.parent_wechat || "",
     internalNote: row.internal_note || "", rawText: row.raw_text || "", assignedTeacherContact: row.assigned_teacher_contact || "",
     agentId: row.agent_id || "", agentName: row.agent_name || "中介", agentWechat: row.agent_wechat || "",
     status: row.status, version: Number(row.version || 1), createdAt: row.created_at || "", updatedAt: row.updated_at || "",
+    lockedByAgentId: row.locked_by_agent_id || "", lockedAt: row.locked_at || "",
+    lockFollowUpAt: row.lock_follow_up_at || "",
+    lockOverdue: row.status === "paused" && Boolean(row.lock_follow_up_at) && new Date(row.lock_follow_up_at) <= new Date(),
+    staleLevel: row.status === "active" ? staleLevel(row.updated_at) : "",
     closedAt: row.closed_at || "", anonymizedAt: row.anonymized_at || ""
   };
+}
+
+function staleLevel(updatedAt, now = new Date()) {
+  if (!updatedAt) return "";
+  const ageDays = (now.getTime() - new Date(updatedAt).getTime()) / 86400000;
+  if (ageDays >= 14) return "critical";
+  if (ageDays >= 7) return "warning";
+  return "";
 }
 
 function mapImportItem(row) {
   return {
     id: row.id, batchId: row.batch_id, rowNumber: row.row_number, rawText: row.raw_text || "",
     parsedData: row.parsed_data || {}, warnings: row.warnings || [], reviewStatus: row.review_status,
+    fieldConfidence: row.field_confidence || {}, fieldSources: row.field_sources || {},
+    contentFingerprint: row.content_fingerprint || "", errorCategory: row.error_category || "",
     duplicateConfirmed: row.duplicate_confirmed === true, publishedOrderId: row.published_order_id || "",
     version: Number(row.version || 1), updatedAt: row.updated_at || ""
   };
@@ -116,14 +142,15 @@ function pageResult(rows, page) {
   return { items: rows.map(mapOrder), page: currentPage, pageSize: PAGE_SIZE, totalItems, totalPages: Math.max(1, Math.ceil(totalItems / PAGE_SIZE)) };
 }
 
-async function databaseDuplicateWarnings(client, data, excludeOrderId = null) {
+async function databaseDuplicateWarnings(client, data, excludeOrderId = null, excludeBatchId = null) {
   const values = [
     String(data.orderNo || "").trim(), String(data.parentPhone || "").trim(), String(data.parentWechat || "").trim(),
     String(data.address || "").trim(), String(data.grade || "").trim(), String(data.subject || "").trim(),
-    String(data.rawText || "").trim(), excludeOrderId
+    String(data.rawText || "").trim(), excludeOrderId, excludeBatchId
   ];
   const result = await client.query(`SELECT order_no, parent_phone, parent_wechat, address, grade, subject, raw_text
     FROM orders WHERE ($8::uuid IS NULL OR id <> $8)
+      AND ($9::uuid IS NULL OR import_batch_id IS DISTINCT FROM $9)
       AND (($1 <> '' AND order_no = $1)
         OR ($2 <> '' AND parent_phone = $2)
         OR ($3 <> '' AND parent_wechat = $3)
@@ -138,6 +165,143 @@ async function databaseDuplicateWarnings(client, data, excludeOrderId = null) {
     if (values[6] && row.raw_text) warnings.add("原始文本高度相似");
   }
   return [...warnings];
+}
+
+async function databaseDuplicateWarningsForItems(client, items) {
+  if (!items.length) return new Map();
+  const payload = items.map((item) => ({
+    row_number: item.rowNumber,
+    order_no: String(item.parsedData?.orderNo || "").trim(),
+    parent_phone: String(item.parsedData?.parentPhone || "").trim(),
+    parent_wechat: String(item.parsedData?.parentWechat || "").trim(),
+    address: String(item.parsedData?.address || "").trim(),
+    grade: String(item.parsedData?.grade || "").trim(),
+    subject: String(item.parsedData?.subject || "").trim(),
+    raw_text: String(item.parsedData?.rawText || item.rawText || "").trim()
+  }));
+  const result = await client.query(`WITH incoming AS (
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(
+        row_number integer, order_no text, parent_phone text, parent_wechat text,
+        address text, grade text, subject text, raw_text text
+      )
+    )
+    SELECT i.row_number,
+      bool_or(i.order_no <> '' AND o.order_no = i.order_no) AS same_order_no,
+      bool_or((i.parent_phone <> '' AND o.parent_phone = i.parent_phone)
+        OR (i.parent_wechat <> '' AND o.parent_wechat = i.parent_wechat)) AS same_contact,
+      bool_or(i.address <> '' AND i.grade <> '' AND i.subject <> ''
+        AND o.address = i.address AND o.grade = i.grade AND o.subject = i.subject) AS same_core,
+      bool_or(i.raw_text <> '' AND o.raw_text IS NOT NULL AND similarity(o.raw_text, i.raw_text) >= 0.65) AS same_raw
+    FROM incoming i JOIN orders o ON o.status <> 'deleted' AND (
+      (i.order_no <> '' AND o.order_no = i.order_no)
+      OR (i.parent_phone <> '' AND o.parent_phone = i.parent_phone)
+      OR (i.parent_wechat <> '' AND o.parent_wechat = i.parent_wechat)
+      OR (i.address <> '' AND i.grade <> '' AND i.subject <> ''
+        AND o.address = i.address AND o.grade = i.grade AND o.subject = i.subject)
+      OR (i.raw_text <> '' AND o.raw_text IS NOT NULL AND similarity(o.raw_text, i.raw_text) >= 0.65)
+    ) GROUP BY i.row_number`, [JSON.stringify(payload)]);
+  const warnings = new Map();
+  for (const row of result.rows) {
+    const values = [];
+    if (row.same_order_no) values.push("订单号相同");
+    if (row.same_contact) values.push("家长微信/电话相同");
+    if (row.same_core) values.push("地址 + 年级 + 科目相同");
+    if (row.same_raw) values.push("原始文本高度相似");
+    warnings.set(Number(row.row_number), values);
+  }
+  return warnings;
+}
+
+function classifyImportError(warnings) {
+  if (warnings.some((warning) => warning.includes("重复") || warning.includes("相同") || warning.includes("相似"))) return "duplicate";
+  if (warnings.some((warning) => warning.startsWith("缺少"))) return "missing_fields";
+  if (warnings.some((warning) => warning.startsWith("识别不确定"))) return "low_confidence";
+  return "";
+}
+
+function chunks(items, size) {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
+function pendingImportItems(items, lastProcessedRow = 0, existingRows = []) {
+  const existing = new Set(existingRows.map(Number));
+  return items.filter((item) => {
+    const rowNumber = Number(item.rowNumber || 0);
+    return rowNumber > Number(lastProcessedRow || 0) && !existing.has(rowNumber);
+  });
+}
+
+function createImportDuplicateIndex(items = []) {
+  const index = { orderNos: new Set(), contacts: new Set(), coreFields: new Set(), rawTexts: new Set() };
+  for (const item of items) addImportToDuplicateIndex(index, item);
+  return index;
+}
+
+function cloneImportDuplicateIndex(index) {
+  return {
+    orderNos: new Set(index.orderNos), contacts: new Set(index.contacts),
+    coreFields: new Set(index.coreFields), rawTexts: new Set(index.rawTexts)
+  };
+}
+
+function normalizedIndexValue(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function addImportToDuplicateIndex(index, data) {
+  if (data?.status === "deleted") return index;
+  const orderNo = normalizedIndexValue(data?.orderNo);
+  const phone = normalizedIndexValue(data?.parentPhone);
+  const wechat = normalizedIndexValue(data?.parentWechat);
+  const address = normalizedIndexValue(data?.address);
+  const grade = normalizedIndexValue(data?.grade);
+  const subject = normalizedIndexValue(data?.subject);
+  const rawText = normalizedIndexValue(data?.rawText);
+  if (orderNo) index.orderNos.add(orderNo);
+  if (phone) index.contacts.add(phone);
+  if (wechat) index.contacts.add(wechat);
+  if (address && grade && subject) index.coreFields.add(`${address}\u0000${grade}\u0000${subject}`);
+  if (rawText) index.rawTexts.add(rawText);
+  return index;
+}
+
+function duplicateWarningsFromIndex(data, index) {
+  const warnings = [];
+  const orderNo = normalizedIndexValue(data?.orderNo);
+  const phone = normalizedIndexValue(data?.parentPhone);
+  const wechat = normalizedIndexValue(data?.parentWechat);
+  const address = normalizedIndexValue(data?.address);
+  const grade = normalizedIndexValue(data?.grade);
+  const subject = normalizedIndexValue(data?.subject);
+  const rawText = normalizedIndexValue(data?.rawText);
+  if (orderNo && index.orderNos.has(orderNo)) warnings.push("订单号相同");
+  if ((phone && index.contacts.has(phone)) || (wechat && index.contacts.has(wechat))) warnings.push("家长微信/电话相同");
+  if (address && grade && subject && index.coreFields.has(`${address}\u0000${grade}\u0000${subject}`)) warnings.push("地址 + 年级 + 科目相同");
+  if (rawText && index.rawTexts.has(rawText)) warnings.push("原始文本相同");
+  return warnings;
+}
+
+async function insertImportItems(client, batchId, items) {
+  if (!items.length) return [];
+  const columnsPerRow = 10;
+  const values = [];
+  const rows = items.map((item, rowIndex) => {
+    const start = rowIndex * columnsPerRow + 1;
+    values.push(
+      batchId, item.rowNumber, item.rawText || null, item.parsedData || {}, JSON.stringify(item.warnings || []),
+      item.reviewStatus, item.fieldConfidence || {}, item.fieldSources || {}, item.contentFingerprint || null,
+      item.errorCategory || null
+    );
+    return `(${Array.from({ length: columnsPerRow }, (_, index) => `$${start + index}`).join(",")})`;
+  });
+  const inserted = await client.query(`INSERT INTO import_items
+    (batch_id, row_number, raw_text, parsed_data, warnings, review_status,
+      field_confidence, field_sources, content_fingerprint, error_category)
+    VALUES ${rows.join(",")}
+    ON CONFLICT (batch_id, row_number) DO NOTHING RETURNING *`, values);
+  return inserted.rows;
 }
 
 async function allocateOrderNo(client) {
@@ -256,45 +420,141 @@ function createRepository(pool) {
     async createImportBatch({ sourceType, filename, items }, actor) {
       if (!Array.isArray(items) || !items.length) throw domainError("IMPORT_EMPTY", "没有可导入的数据", 400);
       if (items.length > 5000) throw domainError("IMPORT_TOO_MANY_ROWS", "单批最多导入5000条", 400);
-      return transaction(pool, async (client) => {
-        const batchResult = await client.query(`INSERT INTO import_batches
-          (source_type, original_filename, created_by, total_count) VALUES ($1, $2, $3, $4) RETURNING *`,
-          [sourceType, filename || null, actor.id, items.length]);
-        const batch = batchResult.rows[0];
-        let readyCount = 0;
-        let needsReviewCount = 0;
-        const staged = [];
-        const priorItems = [];
-        for (const item of items) {
-          const parsedData = item.parsedData || {};
-          const validation = validateImportItem(parsedData);
-          const duplicates = [
-            ...await databaseDuplicateWarnings(client, parsedData),
-            ...findInBatchDuplicateWarnings({ ...parsedData, status: "active" }, priorItems)
-          ];
-          const warnings = [...new Set([...(item.warnings || []), ...validation.warnings, ...duplicates])];
-          const reviewStatus = validation.warnings.length || duplicates.length ? "needs_review" : "ready";
-          if (reviewStatus === "ready") readyCount += 1;
-          else needsReviewCount += 1;
-          const inserted = await client.query(`INSERT INTO import_items
-            (batch_id, row_number, raw_text, parsed_data, warnings, review_status)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-            [batch.id, item.rowNumber, item.rawText || null, parsedData, JSON.stringify(warnings), reviewStatus]);
-          staged.push(inserted.rows[0]);
-          priorItems.push({ ...parsedData, status: "active" });
+      const batchResult = await query(`INSERT INTO import_batches
+        (source_type, original_filename, created_by, total_count, status)
+        VALUES ($1, $2, $3, $4, 'processing') RETURNING *`,
+        [sourceType, filename || null, actor.id, items.length]);
+      const batch = batchResult.rows[0];
+      let readyCount = 0;
+      let needsReviewCount = 0;
+      let processedCount = 0;
+      const staged = [];
+      let duplicateIndex = createImportDuplicateIndex();
+      try {
+        for (const group of chunks(items, 200)) {
+          const groupResult = await transaction(pool, async (client) => {
+            const databaseWarnings = await databaseDuplicateWarningsForItems(client, group);
+            const nextDuplicateIndex = cloneImportDuplicateIndex(duplicateIndex);
+            let groupReadyCount = 0;
+            let groupNeedsReviewCount = 0;
+            const prepared = group.map((item) => {
+              const parsedData = item.parsedData || {};
+              const validation = validateImportItem(parsedData, item.fieldConfidence);
+              const duplicates = [
+                ...(databaseWarnings.get(Number(item.rowNumber)) || []),
+                ...duplicateWarningsFromIndex(parsedData, nextDuplicateIndex)
+              ];
+              const warnings = [...new Set([...(item.warnings || []), ...validation.warnings, ...duplicates])];
+              const reviewStatus = validation.warnings.length || duplicates.length ? "needs_review" : "ready";
+              if (reviewStatus === "ready") groupReadyCount += 1;
+              else groupNeedsReviewCount += 1;
+              addImportToDuplicateIndex(nextDuplicateIndex, parsedData);
+              return { ...item, warnings, reviewStatus, errorCategory: classifyImportError(warnings) };
+            });
+            const rows = await insertImportItems(client, batch.id, prepared);
+            const lastRow = Math.max(...group.map((item) => Number(item.rowNumber || 0)));
+            await client.query(`UPDATE import_batches SET ready_count = $2, needs_review_count = $3,
+              processed_count = $4, last_processed_row = $5, updated_at = now() WHERE id = $1`,
+              [batch.id, readyCount + groupReadyCount, needsReviewCount + groupNeedsReviewCount,
+                processedCount + group.length, lastRow]);
+            return { rows, nextDuplicateIndex, groupReadyCount, groupNeedsReviewCount, groupItemCount: group.length };
+          });
+          readyCount += groupResult.groupReadyCount;
+          needsReviewCount += groupResult.groupNeedsReviewCount;
+          processedCount += groupResult.groupItemCount;
+          duplicateIndex = groupResult.nextDuplicateIndex;
+          staged.push(...groupResult.rows);
         }
-        await client.query(`UPDATE import_batches SET ready_count = $2, needs_review_count = $3 WHERE id = $1`,
-          [batch.id, readyCount, needsReviewCount]);
-        return { id: batch.id, sourceType, filename: filename || "", totalCount: items.length, readyCount, needsReviewCount, items: staged };
-      });
+        await query("UPDATE import_batches SET status = 'reviewing', updated_at = now() WHERE id = $1", [batch.id]);
+      } catch (error) {
+        await query(`UPDATE import_batches SET status = 'failed', failed_count = total_count - processed_count,
+          error_message = $2, updated_at = now() WHERE id = $1`, [batch.id, String(error.message || "导入失败").slice(0, 500)]).catch(() => {});
+        throw error;
+      }
+      return { id: batch.id, sourceType, filename: filename || "", totalCount: items.length, readyCount, needsReviewCount, items: staged };
+    },
+    async resumeImportBatch(batchId, items, actor) {
+      if (!Array.isArray(items) || !items.length) throw domainError("IMPORT_EMPTY", "No import data was supplied", 400);
+      if (items.length > 5000) throw domainError("IMPORT_TOO_MANY_ROWS", "A batch can contain at most 5000 rows", 400);
+      const batchResult = await query(`SELECT id, source_type, original_filename, created_by, total_count,
+        ready_count, needs_review_count, processed_count, last_processed_row, status
+        FROM import_batches WHERE id = $1`, [batchId]);
+      const batch = batchResult.rows[0];
+      if (!batch) throw domainError("IMPORT_BATCH_NOT_FOUND", "Import batch not found", 404);
+      if (String(batch.created_by) !== String(actor.id) && actor.role !== "admin") {
+        throw domainError("IMPORT_BATCH_FORBIDDEN", "Only the batch owner or an administrator can resume it", 403);
+      }
+      if (batch.status === "completed") throw domainError("IMPORT_BATCH_COMPLETE", "Completed batches cannot be resumed", 409);
+
+      const existingResult = await query(`SELECT row_number, parsed_data FROM import_items
+        WHERE batch_id = $1 ORDER BY row_number`, [batchId]);
+      const existingRows = existingResult.rows.map((row) => Number(row.row_number));
+      const pending = pendingImportItems(items, batch.last_processed_row, existingRows);
+      const priorItems = existingResult.rows.map((row) => ({ ...(row.parsed_data || {}), status: "active" }));
+      let duplicateIndex = createImportDuplicateIndex(priorItems);
+      let readyCount = Number(batch.ready_count || 0);
+      let needsReviewCount = Number(batch.needs_review_count || 0);
+      let processedCount = Number(batch.processed_count || existingRows.length);
+      const staged = [];
+      await query(`UPDATE import_batches SET status = 'processing', total_count = GREATEST(total_count, $2),
+        failed_count = 0, error_message = NULL, updated_at = now() WHERE id = $1`, [batchId, items.length]);
+      try {
+        for (const group of chunks(pending, 200)) {
+          const groupResult = await transaction(pool, async (client) => {
+            const databaseWarnings = await databaseDuplicateWarningsForItems(client, group);
+            const nextDuplicateIndex = cloneImportDuplicateIndex(duplicateIndex);
+            let groupReadyCount = 0;
+            let groupNeedsReviewCount = 0;
+            const prepared = group.map((item) => {
+              const parsedData = item.parsedData || {};
+              const validation = validateImportItem(parsedData, item.fieldConfidence);
+              const duplicates = [
+                ...(databaseWarnings.get(Number(item.rowNumber)) || []),
+                ...duplicateWarningsFromIndex(parsedData, nextDuplicateIndex)
+              ];
+              const warnings = [...new Set([...(item.warnings || []), ...validation.warnings, ...duplicates])];
+              const reviewStatus = validation.warnings.length || duplicates.length ? "needs_review" : "ready";
+              if (reviewStatus === "ready") groupReadyCount += 1;
+              else groupNeedsReviewCount += 1;
+              addImportToDuplicateIndex(nextDuplicateIndex, parsedData);
+              return { ...item, warnings, reviewStatus, errorCategory: classifyImportError(warnings) };
+            });
+            const rows = await insertImportItems(client, batchId, prepared);
+            const lastRow = Math.max(...group.map((item) => Number(item.rowNumber || 0)));
+            await client.query(`UPDATE import_batches SET ready_count = $2, needs_review_count = $3,
+              processed_count = $4, last_processed_row = $5, updated_at = now() WHERE id = $1`,
+              [batchId, readyCount + groupReadyCount, needsReviewCount + groupNeedsReviewCount,
+                processedCount + group.length, lastRow]);
+            return { rows, nextDuplicateIndex, groupReadyCount, groupNeedsReviewCount, groupItemCount: group.length };
+          });
+          readyCount += groupResult.groupReadyCount;
+          needsReviewCount += groupResult.groupNeedsReviewCount;
+          processedCount += groupResult.groupItemCount;
+          duplicateIndex = groupResult.nextDuplicateIndex;
+          staged.push(...groupResult.rows);
+        }
+        await query("UPDATE import_batches SET status = 'reviewing', updated_at = now() WHERE id = $1", [batchId]);
+      } catch (error) {
+        await query(`UPDATE import_batches SET status = 'failed', failed_count = total_count - processed_count,
+          error_message = $2, updated_at = now() WHERE id = $1`, [batchId, String(error.message || "Import failed").slice(0, 500)]).catch(() => {});
+        throw error;
+      }
+      return {
+        id: batchId, sourceType: batch.source_type, filename: batch.original_filename || "",
+        totalCount: Math.max(Number(batch.total_count || 0), items.length), processedCount,
+        readyCount, needsReviewCount, resumedCount: staged.length, items: staged
+      };
     },
     async listImportBatches() {
       const result = await query(`SELECT id, source_type, original_filename, total_count, ready_count,
-        needs_review_count, published_count, created_at FROM import_batches ORDER BY created_at DESC LIMIT 20`);
+        needs_review_count, published_count, status, processed_count, failed_count, last_processed_row,
+        error_message, created_at, updated_at FROM import_batches ORDER BY created_at DESC LIMIT 20`);
       return result.rows.map((row) => ({
         id: row.id, sourceType: row.source_type, filename: row.original_filename || "", totalCount: row.total_count,
         readyCount: row.ready_count, needsReviewCount: row.needs_review_count, publishedCount: row.published_count,
-        createdAt: row.created_at
+        status: row.status, processedCount: row.processed_count, failedCount: row.failed_count,
+        lastProcessedRow: row.last_processed_row, errorMessage: row.error_message || "",
+        createdAt: row.created_at, updatedAt: row.updated_at
       }));
     },
     async listImportErrors(batchId) {
@@ -302,14 +562,44 @@ function createRepository(pool) {
         WHERE batch_id = $1 AND review_status = 'needs_review' ORDER BY row_number`, [batchId]);
       return result.rows.map((row) => ({ rowNumber: row.row_number, parsedData: row.parsed_data || {}, warnings: row.warnings || [] }));
     },
-    async getImportBatch(batchId, page = 1) {
-      const currentPage = normalizePage(page);
-      const result = await query(`SELECT ii.*, count(*) OVER() AS total_count FROM import_items ii
-        WHERE ii.batch_id = $1 ORDER BY ii.row_number LIMIT 10 OFFSET $2`, [batchId, (currentPage - 1) * 10]);
+    async getImportBatch(batchId, options = {}) {
+      if (typeof options !== "object") options = { page: options };
+      const currentPage = normalizePage(options.page);
+      const values = [batchId];
+      const where = ["ii.batch_id = $1"];
+      if (["ready", "needs_review", "published"].includes(options.reviewStatus)) {
+        values.push(options.reviewStatus);
+        where.push(`ii.review_status = $${values.length}`);
+      }
+      if (String(options.keyword || "").trim()) {
+        values.push(`%${String(options.keyword).trim()}%`);
+        const p = `$${values.length}`;
+        where.push(`(ii.raw_text ILIKE ${p} OR ii.parsed_data->>'orderNo' ILIKE ${p}
+          OR ii.parsed_data->>'address' ILIKE ${p} OR ii.parsed_data->>'grade' ILIKE ${p}
+          OR ii.parsed_data->>'subject' ILIKE ${p})`);
+      }
+      values.push((currentPage - 1) * 10);
+      const [result, batchResult] = await Promise.all([
+        query(`SELECT ii.*, count(*) OVER() AS total_count FROM import_items ii
+          WHERE ${where.join(" AND ")} ORDER BY ii.row_number LIMIT 10 OFFSET $${values.length}`, values),
+        query(`SELECT id, status, total_count, processed_count, ready_count, needs_review_count,
+          published_count, failed_count, last_processed_row, error_message, updated_at
+          FROM import_batches WHERE id = $1`, [batchId])
+      ]);
       const totalItems = Number(result.rows[0]?.total_count || 0);
-      return { items: result.rows.map(mapImportItem), page: currentPage, pageSize: 10, totalItems, totalPages: Math.max(1, Math.ceil(totalItems / 10)) };
+      const batch = batchResult.rows[0];
+      return {
+        batch: batch ? {
+          id: batch.id, status: batch.status, totalCount: batch.total_count, processedCount: batch.processed_count,
+          readyCount: batch.ready_count, needsReviewCount: batch.needs_review_count,
+          publishedCount: batch.published_count, failedCount: batch.failed_count,
+          lastProcessedRow: batch.last_processed_row, errorMessage: batch.error_message || "", updatedAt: batch.updated_at
+        } : null,
+        items: result.rows.map(mapImportItem), page: currentPage, pageSize: 10,
+        totalItems, totalPages: Math.max(1, Math.ceil(totalItems / 10))
+      };
     },
-    async updateImportItem(itemId, input) {
+    async updateImportItem(itemId, input, actor) {
       return transaction(pool, async (client) => {
         const currentResult = await client.query("SELECT * FROM import_items WHERE id = $1 FOR UPDATE", [itemId]);
         const current = currentResult.rows[0];
@@ -317,44 +607,67 @@ function createRepository(pool) {
         if (current.review_status === "published") throw domainError("IMPORT_ITEM_READ_ONLY", "已发布记录不能修改", 409);
         if (Number(input.version) !== Number(current.version)) throw domainError("IMPORT_VERSION_CONFLICT", "记录已被更新，请刷新后重试", 409);
         const parsedData = { ...(current.parsed_data || {}), ...(input.parsedData || {}) };
-        const validation = validateImportItem(parsedData);
+        const fieldConfidence = { ...(current.field_confidence || {}) };
+        const fieldSources = { ...(current.field_sources || {}) };
+        for (const field of Object.keys(input.parsedData || {})) {
+          fieldConfidence[field] = String(input.parsedData[field] ?? "").trim() ? "high" : "low";
+          fieldSources[field] = { method: "manual-review", agentId: actor?.id || null };
+        }
+        const validation = validateImportItem(parsedData, fieldConfidence);
         const duplicates = await databaseDuplicateWarnings(client, parsedData);
         const duplicateConfirmed = input.duplicateConfirmed === true;
         const warnings = [...new Set([...validation.warnings, ...duplicates])];
         const reviewStatus = validation.warnings.length || (duplicates.length && !duplicateConfirmed) ? "needs_review" : "ready";
         const updated = await client.query(`UPDATE import_items SET parsed_data = $2, warnings = $3, review_status = $4,
-          duplicate_confirmed = $5, version = version + 1, updated_at = now() WHERE id = $1 AND version = $6 RETURNING *`,
-          [itemId, parsedData, JSON.stringify(warnings), reviewStatus, duplicateConfirmed, Number(current.version)]);
+          duplicate_confirmed = $5, field_confidence = $6, field_sources = $7, error_category = $8,
+          version = version + 1, updated_at = now() WHERE id = $1 AND version = $9 RETURNING *`,
+          [itemId, parsedData, JSON.stringify(warnings), reviewStatus, duplicateConfirmed, fieldConfidence, fieldSources,
+            classifyImportError(warnings), Number(current.version)]);
         if (!updated.rows[0]) throw domainError("IMPORT_VERSION_CONFLICT", "记录已被更新，请刷新后重试", 409);
         return mapImportItem(updated.rows[0]);
       });
     },
-    async publishImportBatch(batchId, actor) {
+    async publishImportBatch(batchId, options = {}, actor) {
+      if (!actor && options?.id) {
+        actor = options;
+        options = {};
+      }
+      const selectedIds = options.mode === "selected" ? (options.itemIds || []).slice(0, 50) : null;
       return transaction(pool, async (client) => {
-        const result = await client.query(`SELECT * FROM import_items WHERE batch_id = $1 AND review_status <> 'published'
-          ORDER BY row_number FOR UPDATE`, [batchId]);
-        const ready = result.rows.filter((row) => row.review_status === "ready");
+        await client.query("UPDATE import_batches SET status = 'publishing', updated_at = now() WHERE id = $1", [batchId]);
+        const result = await client.query(`SELECT * FROM import_items
+          WHERE batch_id = $1 AND review_status = 'ready'
+            AND ($2::uuid[] IS NULL OR id = ANY($2::uuid[]))
+          ORDER BY row_number LIMIT 50 FOR UPDATE SKIP LOCKED`, [batchId, selectedIds]);
+        const ready = result.rows;
         let publishedCount = 0;
+        let duplicateCount = 0;
         for (const item of ready) {
           const data = item.parsed_data || {};
-          const freshDuplicates = await databaseDuplicateWarnings(client, data);
+          const freshDuplicates = await databaseDuplicateWarnings(client, data, null, batchId);
           if (freshDuplicates.length && !item.duplicate_confirmed) {
             const warnings = [...new Set([...(item.warnings || []), ...freshDuplicates])];
             await client.query(`UPDATE import_items SET warnings = $2, review_status = 'needs_review',
-              version = version + 1, updated_at = now() WHERE id = $1`, [item.id, JSON.stringify(warnings)]);
+              error_category = 'duplicate', version = version + 1, updated_at = now() WHERE id = $1`, [item.id, JSON.stringify(warnings)]);
+            duplicateCount += 1;
             continue;
           }
           const orderNo = String(data.orderNo || "").trim() || await allocateOrderNo(client);
           let inserted;
           try {
             inserted = await client.query(`INSERT INTO orders (
-              order_no, student_gender, grade, subject, score, lesson_time, price, area, address,
-              teacher_requirement, parent_name, parent_phone, parent_wechat, internal_note, raw_text,
-              agent_id, status, review_status, published_at, idempotency_key, import_batch_id
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active','published',now(),$17,$18)
+              order_no, student_gender, grade, subject, score, lesson_time, start_time_text,
+              lesson_frequency, lesson_duration, price, area, address, teacher_requirement,
+              teacher_gender_requirement, teacher_education_requirement, parent_name, parent_phone,
+              parent_wechat, internal_note, raw_text, agent_id, status, review_status, published_at,
+              idempotency_key, import_batch_id
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+              'active','published',now(),$22,$23)
             RETURNING id`, [
-              orderNo, data.studentGender || null, data.grade, data.subject, data.score, data.lessonTime, data.price,
-              data.area, data.address, data.requirement || null, data.parentName || null, data.parentPhone || null,
+              orderNo, data.studentGender || null, data.grade, data.subject, data.score, data.lessonTime,
+              data.startTimeText || null, data.lessonFrequency || null, data.lessonDuration || null, data.price,
+              data.area, data.address, data.requirement || null, data.teacherGenderRequirement || null,
+              data.teacherEducationRequirement || null, data.parentName || null, data.parentPhone || null,
               data.parentWechat || null, data.internalNote || null, data.rawText || item.raw_text || null,
               actor.id, `import:${item.id}`, batchId
             ]);
@@ -369,8 +682,22 @@ function createRepository(pool) {
           publishedCount += 1;
         }
         await client.query(`UPDATE import_batches SET published_count = published_count + $2,
-          ready_count = GREATEST(ready_count - $2, 0) WHERE id = $1`, [batchId, publishedCount]);
-        return { publishedCount, skippedCount: result.rows.length - publishedCount };
+          ready_count = GREATEST(ready_count - $2 - $3, 0),
+          needs_review_count = needs_review_count + $3, updated_at = now() WHERE id = $1`,
+          [batchId, publishedCount, duplicateCount]);
+        const remaining = await client.query(`SELECT
+          count(*) FILTER (WHERE review_status = 'ready')::int AS ready_count,
+          count(*) FILTER (WHERE review_status = 'needs_review')::int AS needs_review_count
+          FROM import_items WHERE batch_id = $1`, [batchId]);
+        const remainingCount = Number(remaining.rows[0]?.ready_count || 0);
+        const needsReviewCount = Number(remaining.rows[0]?.needs_review_count || 0);
+        await client.query(`UPDATE import_batches SET status = $2, updated_at = now() WHERE id = $1`,
+          [batchId, remainingCount || needsReviewCount ? "reviewing" : "completed"]);
+        return {
+          publishedCount,
+          skippedCount: selectedIds ? Math.max(0, selectedIds.length - publishedCount) : needsReviewCount,
+          remainingCount
+        };
       });
     },
     async createOrder(input, actor) {
@@ -391,14 +718,18 @@ function createRepository(pool) {
         let inserted;
         try {
           inserted = await client.query(`INSERT INTO orders (
-            order_no, student_gender, grade, subject, score, lesson_time, price, area, address,
-            teacher_requirement, parent_name, parent_phone, parent_wechat, internal_note, raw_text,
-            agent_id, status, review_status, published_at, idempotency_key
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active','published',now(),$17)
+            order_no, student_gender, grade, subject, score, lesson_time, start_time_text,
+            lesson_frequency, lesson_duration, price, area, address, teacher_requirement,
+            teacher_gender_requirement, teacher_education_requirement, parent_name, parent_phone,
+            parent_wechat, internal_note, raw_text, agent_id, status, review_status, published_at, idempotency_key
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+            'active','published',now(),$22)
           RETURNING *`, [
             orderNo, input.studentGender || null, input.grade.trim(), input.subject.trim(), input.score.trim(), input.lessonTime.trim(),
-            input.price.trim(), input.area.trim(), input.address.trim(), input.requirement || null, input.parentName || null,
-            input.parentPhone || null, input.parentWechat || null, input.internalNote || null, input.rawText || null,
+            input.startTimeText || null, input.lessonFrequency || null, input.lessonDuration || null, input.price.trim(),
+            input.area.trim(), input.address.trim(), input.requirement || null, input.teacherGenderRequirement || null,
+            input.teacherEducationRequirement || null, input.parentName || null, input.parentPhone || null,
+            input.parentWechat || null, input.internalNote || null, input.rawText || null,
             input.agentId || actor.id, input.idempotencyKey || null
           ]);
         } catch (error) {
@@ -420,7 +751,9 @@ function createRepository(pool) {
         if (!ACTIVE_STATUSES.includes(current.status)) throw domainError("ORDER_READ_ONLY", "历史订单只读，不能编辑", 409);
         const columnMap = {
           orderNo: "order_no", studentGender: "student_gender", grade: "grade", subject: "subject", score: "score",
-          lessonTime: "lesson_time", price: "price", area: "area", address: "address", requirement: "teacher_requirement",
+          lessonTime: "lesson_time", startTimeText: "start_time_text", lessonFrequency: "lesson_frequency",
+          lessonDuration: "lesson_duration", price: "price", area: "area", address: "address", requirement: "teacher_requirement",
+          teacherGenderRequirement: "teacher_gender_requirement", teacherEducationRequirement: "teacher_education_requirement",
           parentName: "parent_name", parentPhone: "parent_phone", parentWechat: "parent_wechat", internalNote: "internal_note",
           rawText: "raw_text", agentId: "agent_id"
         };
@@ -460,9 +793,14 @@ function createRepository(pool) {
         const closedAt = HISTORY_STATUSES.includes(input.status) ? new Date() : null;
         const contact = input.status === "paused" ? String(input.assignedTeacherContact).trim() : (input.status === "active" ? null : current.assigned_teacher_contact);
         const closeReason = HISTORY_STATUSES.includes(input.status) ? String(input.reason).trim() : null;
+        const lockMetadata = input.status === "paused"
+          ? { agentId: actor.id, lockedAt: new Date(), followUpAt: new Date(Date.now() + 24 * 60 * 60 * 1000) }
+          : { agentId: null, lockedAt: null, followUpAt: null };
         const updated = await client.query(`UPDATE orders SET status = $2, assigned_teacher_contact = $3, closed_at = $4,
-          close_reason = $5, version = version + 1, updated_at = now() WHERE id = $1 AND version = $6 RETURNING *`,
-          [orderId, input.status, contact, closedAt, closeReason, Number(current.version)]);
+          close_reason = $5, locked_by_agent_id = $6, locked_at = $7, lock_follow_up_at = $8,
+          version = version + 1, updated_at = now() WHERE id = $1 AND version = $9 RETURNING *`,
+          [orderId, input.status, contact, closedAt, closeReason, lockMetadata.agentId, lockMetadata.lockedAt,
+            lockMetadata.followUpAt, Number(current.version)]);
         if (!updated.rows[0]) throw domainError("ORDER_VERSION_CONFLICT", "订单已被其他人更新，请刷新后重试", 409);
         await client.query(`INSERT INTO order_logs (order_id, actor_agent_id, actor_name_snapshot, action, reason, from_status, to_status, changes)
           VALUES ($1, $2, $3, '状态变更', $4, $5, $6, $7)`, [orderId, actor.id, actor.name, String(input.reason).trim(), current.status, input.status,
@@ -500,4 +838,9 @@ function createRepository(pool) {
   };
 }
 
-module.exports = { PAGE_SIZE, assertRequiredOrderFields, buildAgentOrderQuery, buildTeacherOrderQuery, createRepository, databaseDuplicateWarnings, mapAgent, mapImportItem, mapOrder, normalizePage, placeholders };
+module.exports = {
+  PAGE_SIZE, addImportToDuplicateIndex, assertRequiredOrderFields, buildAgentOrderQuery,
+  buildTeacherOrderQuery, createImportDuplicateIndex, createRepository, databaseDuplicateWarnings,
+  duplicateWarningsFromIndex, mapAgent, mapImportItem, mapOrder, normalizePage,
+  pendingImportItems, placeholders
+};

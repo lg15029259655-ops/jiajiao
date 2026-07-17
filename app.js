@@ -6,8 +6,6 @@ const useApi = document.body.dataset.mode !== "demo";
 
 const now = () => new Date().toISOString();
 
-detectDevice();
-
 const demoData = {
   agents: [
     { id: "admin_1", account: "demo-admin", name: "管理员", wechat: "", phone: "", password: "", role: "admin", active: true },
@@ -135,6 +133,7 @@ const visibleOrders = new Map();
 let teacherRenderToken = 0;
 let staffRenderToken = 0;
 let reviewRenderToken = 0;
+const selectedImportItems = new Set();
 
 const teacherSelections = {
   grade: new Set(),
@@ -144,17 +143,6 @@ const teacherSelections = {
 
 if (page === "teacher") initTeacherPage();
 if (page === "agent") initAgentPage();
-
-function detectDevice() {
-  const apply = () => {
-    const mobileWidth = window.innerWidth < 980;
-    const touchDevice = navigator.maxTouchPoints > 0;
-    const mobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    document.documentElement.dataset.device = mobileWidth && (touchDevice || mobileUserAgent) ? "mobile" : "desktop";
-  };
-  apply();
-  window.addEventListener("resize", apply);
-}
 
 async function apiJson(url, options = {}) {
   const response = await fetch(url, {
@@ -251,7 +239,7 @@ function initAgentWorkspace() {
   });
   document.querySelector("#profileForm").addEventListener("submit", submitProfile);
   document.querySelector("#agentForm").addEventListener("submit", submitAgent);
-  ["#staffSearch", "#staffScope", "#staffStatus"].forEach((selector) => {
+  ["#staffSearch", "#staffScope", "#staffStatus", "#staffFollowup"].forEach((selector) => {
     document.querySelector(selector).addEventListener("input", resetStaffPage);
     document.querySelector(selector).addEventListener("change", resetStaffPage);
   });
@@ -390,6 +378,7 @@ async function renderStaff() {
   const options = {
     keyword: document.querySelector("#staffSearch").value.trim(),
     status: document.querySelector("#staffStatus").value,
+    followup: document.querySelector("#staffFollowup")?.value || "",
     page: staffPage,
     scope: document.querySelector("#staffScope")?.value === "history" ? "history" : "working"
   };
@@ -436,6 +425,7 @@ function staffQuery(options) {
   const params = new URLSearchParams();
   if (options.keyword) params.set("keyword", options.keyword);
   if (options.status) params.set("status", options.status);
+  if (options.followup) params.set("followup", options.followup);
   params.set("scope", options.scope || "working");
   params.set("page", String(options.page || 1));
   return params.toString();
@@ -460,7 +450,12 @@ async function renderReview() {
     if (!activeImportBatchId) {
       result = { items: [], page: 1, pageSize: 10, totalItems: 0, totalPages: 1 };
     } else {
-      result = await apiJson(`/api/agent/import-batches/${encodeURIComponent(activeImportBatchId)}?page=${reviewPage}`);
+      const reviewParams = new URLSearchParams({ page: String(reviewPage) });
+      const reviewSearch = document.querySelector("#reviewSearch")?.value.trim();
+      const reviewStatus = document.querySelector("#reviewStatus")?.value;
+      if (reviewSearch) reviewParams.set("keyword", reviewSearch);
+      if (reviewStatus) reviewParams.set("reviewStatus", reviewStatus);
+      result = await apiJson(`/api/agent/import-batches/${encodeURIComponent(activeImportBatchId)}?${reviewParams}`);
     }
   } catch (error) {
     if (renderToken !== reviewRenderToken) return;
@@ -473,7 +468,17 @@ async function renderReview() {
   const ready = result.items.filter((order) => order.reviewStatus === "ready").length;
   const needs = result.items.filter((order) => order.reviewStatus === "needs_review").length;
   document.querySelector("#reviewStats").textContent = `本页可发布 ${ready} 条，需要处理 ${needs} 条`;
-  document.querySelector("#reviewList").innerHTML = result.items.map((item) => reviewCard({ id: item.id, version: item.version, ...item.parsedData, reviewStatus: item.reviewStatus, importWarnings: item.warnings })).join("");
+  document.querySelector("#reviewList").innerHTML = result.items.map((item) => reviewCard({
+    id: item.id, version: item.version, ...item.parsedData, reviewStatus: item.reviewStatus,
+    importWarnings: item.warnings, fieldConfidence: item.fieldConfidence
+  })).join("");
+  document.querySelectorAll("[data-select-import]").forEach((input) => {
+    input.checked = selectedImportItems.has(input.dataset.selectImport);
+    input.addEventListener("change", () => {
+      if (input.checked) selectedImportItems.add(input.dataset.selectImport);
+      else selectedImportItems.delete(input.dataset.selectImport);
+    });
+  });
   document.querySelectorAll("[data-edit-import]").forEach((button) => {
     button.addEventListener("click", () => openImportItemEditor(result.items.find((item) => item.id === button.dataset.editImport)));
   });
@@ -505,6 +510,7 @@ function reviewCard(order) {
         <h2>${escapeHtml(order.orderNo || "待生成订单号")}</h2>
         <span class="status ${escapeAttr(order.reviewStatus)}">${order.reviewStatus === "ready" ? "可批量发布" : "需要处理"}</span>
       </div>
+      ${order.reviewStatus === "ready" ? `<label class="review-select"><input type="checkbox" data-select-import="${escapeAttr(order.id)}"> 选择发布</label>` : ""}
       ${infoRows([...publicRows(order), ...privateRows(order)])}
       ${warnings.length ? `<div class="parse-review">${warnings.map(escapeHtml).join("；")}</div>` : `<div class="parse-review success">字段完整，未发现明显重复，可批量发布。</div>`}
       <div class="actions"><button class="subtle" data-edit-import="${escapeAttr(order.id)}">编辑审核项</button></div>
@@ -516,8 +522,10 @@ function openImportItemEditor(item) {
   if (!item) return;
   const data = item.parsedData || {};
   const fields = [["orderNo", "订单号"], ["studentGender", "学生性别"], ["grade", "年级"], ["subject", "科目"],
-    ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["price", "报价"], ["address", "地址"],
-    ["requirement", "老师要求"], ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]];
+    ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["startTimeText", "开始时间"],
+    ["lessonFrequency", "教学频率"], ["lessonDuration", "每次时长"], ["price", "报价"], ["address", "地址"],
+    ["teacherGenderRequirement", "老师性别要求"], ["teacherEducationRequirement", "学历要求"],
+    ["requirement", "其他要求"], ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]];
   const backdrop = document.createElement("div");
   backdrop.className = "dialog-backdrop";
   backdrop.innerHTML = `<section class="dialog-panel order-editor" role="dialog" aria-modal="true">
@@ -590,15 +598,35 @@ async function importFileToReview(event) {
 }
 
 async function publishReadyReviewOrders() {
-  if (!await askConfirm("确认发布所有可通过订单？", "只有字段完整且未发现明显重复的订单会进入老师大厅。")) return;
+  const itemIds = [...selectedImportItems];
+  const selectedMode = itemIds.length > 0;
+  const title = selectedMode ? `确认发布选中的 ${itemIds.length} 条订单？` : "确认发布所有可通过订单？";
+  if (!await askConfirm(title, "每次最多处理50条；字段不完整或新发现重复的记录仍会留在待审核。")) return;
+  const button = document.querySelector("#publishReadyBtn");
+  button.disabled = true;
   try {
     if (!activeImportBatchId) return showToast("暂无可发布的导入批次");
-    const payload = await apiJson(`/api/agent/import-batches/${encodeURIComponent(activeImportBatchId)}/publish`, { method: "POST", body: {} });
+    let totalPublished = 0;
+    let totalSkipped = 0;
+    let remainingCount = 0;
+    do {
+      const payload = await apiJson(`/api/agent/import-batches/${encodeURIComponent(activeImportBatchId)}/publish`, {
+        method: "POST",
+        body: selectedMode ? { mode: "selected", itemIds: itemIds.slice(0, 50) } : { mode: "ready" }
+      });
+      totalPublished += payload.publishedCount;
+      totalSkipped += payload.skippedCount;
+      remainingCount = payload.remainingCount;
+      if (selectedMode) break;
+    } while (remainingCount > 0);
+    selectedImportItems.clear();
     renderReview();
     renderStaff();
-    showToast(`已发布 ${payload.publishedCount} 条订单，跳过 ${payload.skippedCount} 条`);
+    showToast(`已发布 ${totalPublished} 条订单，留待处理 ${totalSkipped} 条`);
   } catch (error) {
-    showToast(error.message);
+    showToast(`${error.message}；已完成的记录不会重复，可再次继续发布`);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -628,6 +656,12 @@ function teacherCard(order) {
 }
 
 function staffCard(order) {
+  const reminder = order.lockOverdue
+    ? `<div class="followup-alert">锁单已超过24小时，请主动跟进</div>`
+    : order.staleLevel === "critical"
+      ? `<div class="followup-alert critical">招募已超过14天未更新，请向家长确认</div>`
+      : order.staleLevel === "warning"
+        ? `<div class="followup-alert">招募已超过7天未更新，请确认是否继续</div>` : "";
   return `
     <article class="order-card ${escapeAttr(order.status)}">
       <div class="card-head">
@@ -635,6 +669,7 @@ function staffCard(order) {
         <button class="text-copy" data-copy="${escapeAttr(order.orderNo)}">复制订单号</button>
         <span class="status ${escapeAttr(order.status)}">${escapeHtml(core.STATUS_TEXT[order.status])}</span>
       </div>
+      ${reminder}
       ${infoRows([...publicRows(order), ...privateRows(order)])}
       ${staffActions(order)}
       ${logList(order)}
@@ -649,8 +684,13 @@ function publicRows(order) {
     ["补习科目", order.subject],
     ["现阶段成绩", order.score || "未说明"],
     ["补习时间", order.lessonTime],
+    ...(order.startTimeText ? [["开始时间", order.startTimeText]] : []),
+    ...(order.lessonFrequency ? [["教学频率", order.lessonFrequency]] : []),
+    ...(order.lessonDuration ? [["每次时长", order.lessonDuration]] : []),
     ["报价", order.price],
     ["地址", order.address],
+    ...(order.teacherGenderRequirement ? [["老师性别", order.teacherGenderRequirement]] : []),
+    ...(order.teacherEducationRequirement ? [["学历要求", order.teacherEducationRequirement]] : []),
     ["对老师要求", order.requirement || "未说明"]
   ];
 }
@@ -749,9 +789,14 @@ async function submitOrder(event) {
     area: String(form.get("area") || "").trim(),
     score: String(form.get("score") || "").trim(),
     lessonTime: String(form.get("lessonTime") || "").trim(),
+    startTimeText: String(form.get("startTimeText") || "").trim(),
+    lessonFrequency: String(form.get("lessonFrequency") || "").trim(),
+    lessonDuration: String(form.get("lessonDuration") || "").trim(),
     price: String(form.get("price") || "").trim(),
     address: String(form.get("address") || "").trim(),
     requirement: String(form.get("requirement") || "").trim(),
+    teacherGenderRequirement: String(form.get("teacherGenderRequirement") || "").trim(),
+    teacherEducationRequirement: String(form.get("teacherEducationRequirement") || "").trim(),
     parentName: String(form.get("parentName") || "").trim(),
     parentPhone: String(form.get("parentPhone") || "").trim(),
     parentWechat: String(form.get("parentWechat") || "").trim(),
@@ -972,14 +1017,22 @@ function fillOrderForm(parsed) {
 
 function showParseReview(parsed) {
   const missing = requiredFields(parsed);
+  const uncertain = core.REQUIRED_ORDER_FIELDS
+    .filter((field) => parsed[field.name] && parsed.fieldConfidence?.[field.name] !== "high")
+    .map((field) => field.label);
   document.querySelector("#parseReview").classList.remove("hidden", "success");
-  document.querySelector("#parseReview").classList.toggle("success", missing.length === 0);
+  document.querySelector("#parseReview").classList.toggle("success", missing.length === 0 && uncertain.length === 0);
   document.querySelector("#parseReview").textContent = missing.length
     ? `识别完成，但这些字段需要人工补充：${missing.join("、")}`
-    : "识别完成，关键字段齐全，请人工核对后发布。";
+    : uncertain.length ? `这些字段来自推断，请重点核对：${uncertain.join("、")}`
+      : "明确标签已识别，关键字段齐全，请人工核对后发布。";
   document.querySelectorAll("#orderForm input, #orderForm textarea").forEach((field) => field.classList.remove("needs-review"));
   missing.forEach((name) => {
     const fieldName = ({ 年级: "grade", 科目: "subject", 时间: "lessonTime", 报价: "price", 地址: "address" })[name];
+    if (fieldName && document.querySelector(`[name="${fieldName}"]`)) document.querySelector(`[name="${fieldName}"]`).classList.add("needs-review");
+  });
+  uncertain.forEach((name) => {
+    const fieldName = core.REQUIRED_ORDER_FIELDS.find((field) => field.label === name)?.name;
     if (fieldName && document.querySelector(`[name="${fieldName}"]`)) document.querySelector(`[name="${fieldName}"]`).classList.add("needs-review");
   });
 }
@@ -1265,7 +1318,9 @@ function openOrderEditor(order) {
   if (!order || !["active", "paused"].includes(order.status)) return showToast("该订单当前不可编辑");
   const fields = [
     ["orderNo", "订单号"], ["studentGender", "学生性别"], ["grade", "年级"], ["subject", "科目"],
-    ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["price", "报价"],
+    ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["startTimeText", "开始时间"],
+    ["lessonFrequency", "教学频率"], ["lessonDuration", "每次时长"], ["price", "报价"],
+    ["teacherGenderRequirement", "老师性别要求"], ["teacherEducationRequirement", "学历要求"],
     ["address", "地址"], ["parentName", "家长称呼"], ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]
   ];
   const backdrop = document.createElement("div");
@@ -1527,16 +1582,24 @@ function normalizeOrder(order) {
     subject: String(order.subject || ""),
     score: String(order.score || ""),
     lessonTime: String(order.lessonTime || ""),
+    startTimeText: String(order.startTimeText || ""),
+    lessonFrequency: String(order.lessonFrequency || ""),
+    lessonDuration: String(order.lessonDuration || ""),
     price: String(order.price || ""),
     area: String(order.area || firstMatch(order.address, core.FILTERS.areas)),
     address: String(order.address || ""),
     requirement: String(order.requirement || ""),
+    teacherGenderRequirement: String(order.teacherGenderRequirement || ""),
+    teacherEducationRequirement: String(order.teacherEducationRequirement || ""),
     parentName: String(order.parentName || ""),
     parentPhone: String(order.parentPhone || ""),
     parentWechat: String(order.parentWechat || ""),
     internalNote: String(order.internalNote || ""),
     rawText: String(order.rawText || ""),
     assignedTeacherContact: String(order.assignedTeacherContact || ""),
+    lockedByAgentId: String(order.lockedByAgentId || ""),
+    lockedAt: String(order.lockedAt || ""),
+    lockFollowUpAt: String(order.lockFollowUpAt || ""),
     agentId: String(order.agentId || "agent_1"),
     status: ["active", "paused", "completed", "cancelled", "deleted"].includes(order.status) ? order.status : "active",
     createdAt: String(order.createdAt || now()),
