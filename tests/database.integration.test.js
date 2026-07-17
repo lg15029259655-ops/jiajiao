@@ -44,7 +44,7 @@ test("Neon temporary schema supports migrations, SQL pagination and optimistic c
       idempotencyKey: `integration-${Date.now()}`, grade: "初二", subject: "数学", area: "雁塔区", score: "80分",
       lessonTime: "周末", price: "100元/小时", address: "集成测试地址"
     }, actor);
-    assert.match(order.orderNo, /^\d{8}$/);
+    assert.match(order.orderNo, /^XJ\d{10,}$/);
     const edits = await Promise.allSettled([
       repository.updateOrder(order.id, { version: order.version, price: "110元/小时", reason: "并发测试A" }, actor),
       repository.updateOrder(order.id, { version: order.version, price: "120元/小时", reason: "并发测试B" }, actor)
@@ -89,11 +89,16 @@ test("Neon temporary schema supports migrations, SQL pagination and optimistic c
     assert.equal(page.totalItems, 5003);
     assert.equal(page.pageSize, 10);
     const versions = await pool.query("SELECT max(version)::int AS version FROM schema_migrations");
-    assert.equal(versions.rows[0].version, 7);
+    assert.equal(versions.rows[0].version, 8);
     const backup = await createBackup(pool);
     await restoreIntoSchema(admin, backup, restoreSchema);
     const restored = await admin.query(`SELECT count(*)::int AS count FROM ${restoreSchema}.orders`);
     assert.equal(restored.rows[0].count, 5003);
+    const restoredSequence = await admin.query(`SELECT
+      (SELECT COALESCE(MAX(substring(order_no FROM 3)::bigint), 0)
+        FROM ${restoreSchema}.orders WHERE order_no ~ '^XJ[0-9]+$') AS max_order_no,
+      nextval('${restoreSchema}.order_number_seq') AS next_order_no`);
+    assert.ok(Number(restoredSequence.rows[0].next_order_no) > Number(restoredSequence.rows[0].max_order_no));
   } finally {
     await pool.end();
     await admin.query(`DROP SCHEMA IF EXISTS ${restoreSchema} CASCADE`);

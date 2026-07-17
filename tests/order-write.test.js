@@ -1,7 +1,30 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createRepository } = require("../src/repository.js");
+const { allocateOrderNo, assertManualOrderNoAllowed, createRepository } = require("../src/repository.js");
+
+test("automatic order numbers use a non-resetting database sequence", async () => {
+  const calls = [];
+  const client = {
+    async query(text) {
+      calls.push(text);
+      return { rows: [{ order_no: "XJ0000000001" }] };
+    }
+  };
+
+  assert.equal(await allocateOrderNo(client), "XJ0000000001");
+  assert.match(calls[0], /nextval\('order_number_seq'\)/);
+  assert.doesNotMatch(calls[0], /current_date|YYMMDD/);
+});
+
+test("manual order numbers cannot claim the automatic XJ namespace", () => {
+  assert.equal(assertManualOrderNoAllowed("001426"), "001426");
+  assert.equal(assertManualOrderNoAllowed("XJ0000000001", "XJ0000000001"), "XJ0000000001");
+  assert.throws(
+    () => assertManualOrderNoAllowed("xj0000000001"),
+    { code: "ORDER_NO_RESERVED" }
+  );
+});
 
 function transactionPool(row) {
   const calls = [];
@@ -68,4 +91,34 @@ test("creating with the same idempotency key returns the existing order", async 
   const order = await repository.createOrder({ idempotencyKey: "same-key", grade: "初二" }, { id: "a1", name: "中介A" });
   assert.equal(order.orderNo, "071601");
   assert.equal(calls.some((call) => /INSERT INTO orders/.test(call.text)), false);
+});
+
+test("concurrent requests with one idempotency key return the winning order", async () => {
+  const calls = [];
+  let idempotencyLookups = 0;
+  const existing = { id: "o2", order_no: "XJ0000000002", status: "active", version: 1, grade: "初二", subject: "数学", area: "雁塔区", address: "地址", lesson_time: "周末", price: "100元/小时" };
+  const client = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/SELECT o\.\*.*idempotency_key/s.test(text)) {
+        idempotencyLookups += 1;
+        return { rows: idempotencyLookups === 1 ? [] : [existing] };
+      }
+      if (/SELECT order_no, parent_phone/.test(text)) return { rows: [] };
+      if (/nextval\('order_number_seq'\)/.test(text)) return { rows: [{ order_no: "XJ0000000003" }] };
+      if (/INSERT INTO orders/.test(text)) return { rows: [] };
+      return { rows: [] };
+    },
+    release() {}
+  };
+  const repository = createRepository({ async connect() { return client; } });
+  const order = await repository.createOrder({
+    idempotencyKey: "same-concurrent-key", grade: "初二", subject: "数学", area: "雁塔区",
+    score: "80分", lessonTime: "周末", price: "100元/小时", address: "地址"
+  }, { id: "a1", name: "中介A" });
+
+  assert.equal(order.orderNo, "XJ0000000002");
+  assert.match(calls.find((call) => /INSERT INTO orders/.test(call.text)).text,
+    /ON CONFLICT \(idempotency_key\).*DO NOTHING/s);
+  assert.equal(idempotencyLookups, 2);
 });

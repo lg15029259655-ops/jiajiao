@@ -43,6 +43,9 @@ const ALIAS_LOOKUP = Object.fromEntries(Object.entries(FIELD_ALIASES).flatMap(([
 
 function validateImportItem(parsedData, fieldConfidence) {
   const warnings = [];
+  if (/^XJ\d+$/i.test(String(parsedData?.orderNo || "").trim())) {
+    warnings.push("XJ开头的订单号由系统自动生成，请清空该编号后重新审核");
+  }
   for (const [field, label] of REQUIRED_FIELDS) {
     if (!String(parsedData?.[field] ?? "").trim()) warnings.push(`缺少${label}`);
     else if (fieldConfidence && fieldConfidence[field] !== "high") warnings.push(`识别不确定：${label}`);
