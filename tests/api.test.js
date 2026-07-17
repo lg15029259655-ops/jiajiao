@@ -16,7 +16,7 @@ function fakeRepository({ role = "staff", mustChangePassword = false } = {}) {
     calls,
     async ping() { return true; },
     async listTeacherOrders() {
-      return { items: [{ id: "o1", orderNo: "071601", status: "active", grade: "初二", subject: "数学", area: "雁塔区", address: "公开地址", agentName: "中介A", agentWechat: "agent001" }], page: 1, pageSize: 10, totalItems: 1, totalPages: 1 };
+      return { items: [{ id: "o1", orderNo: "071601", status: "active", grade: "初二", subject: "数学", area: "雁塔区", address: "交大创新港附近", parentWechat: "privateParent", agentName: "中介A", agentWechat: "agent001" }], page: 1, pageSize: 10, totalItems: 1, totalPages: 1 };
     },
     async findAgentByLogin(account) { return account === "001" ? agent : null; },
     async upgradePassword(id, passwordHashValue) { agent.passwordHash = passwordHashValue; },
@@ -51,6 +51,9 @@ test("health and teacher listing work without authentication", async () => {
   assert.equal(listing.statusCode, 200);
   assert.equal(listing.json().items.length, 1);
   assert.equal(listing.json().items[0].parentPhone, undefined);
+  assert.equal(listing.json().items[0].parentWechat, undefined);
+  assert.equal(listing.json().items[0].address, "交大创新港附近");
+  assert.equal(listing.json().items[0].agentWechat, "agent001");
   await app.close();
 });
 

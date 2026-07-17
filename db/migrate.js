@@ -58,16 +58,16 @@ async function migratePrototypeData({ pool = getPool(), sourcePath = DEFAULT_SOU
     for (const order of source.orders) {
       const result = await client.query(
         `INSERT INTO orders (
-          order_no, student_gender, grade, subject, score, lesson_time, price, area, address,
+          order_no, student_gender, grade, subject, score, lesson_time, price, area, rough_address, address,
           teacher_requirement, parent_name, parent_phone, parent_wechat, internal_note, raw_text,
           assigned_teacher_contact, agent_id, status, review_status, import_batch_id, import_warnings,
           inquiry_count, created_at, updated_at
         ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22,$23,$24
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23,$24,$25
         ) RETURNING id`,
         [
           order.orderNo, order.studentGender || null, order.grade, order.subject, order.score || null, order.lessonTime,
-          order.price, order.area, order.address, order.requirement || null, order.parentName || null, order.parentPhone || null,
+          order.price, order.area, order.roughAddress || order.area, order.address, order.requirement || null, order.parentName || null, order.parentPhone || null,
           order.parentWechat || null, order.internalNote || null, order.rawText || null, order.assignedTeacherContact || null,
           agentIds.get(String(order.agentId)) || null, order.status || "pending_review", order.reviewStatus || "needs_review",
           batchIds.get(String(order.importBatchId)) || null, JSON.stringify(order.importWarnings || []), Number(order.inquiryCount || 0),

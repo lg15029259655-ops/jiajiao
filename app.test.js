@@ -40,6 +40,11 @@ test("production pages are API-only and contain no demo credentials or inquiry U
   assert.match(styles, /@media \(min-width: 768px\) and \(max-width: 1199px\)/);
   assert.match(styles, /@media \(min-width: 1200px\)/);
   assert.match(styles, /loading-card/);
+  assert.match(agentHtml, /name="roughAddress" required/);
+  assert.match(agentHtml, /name="address" required/);
+  assert.match(agentHtml, /name="parentWechat" required/);
+  assert.match(appJs, /\["中介微信",/);
+  assert.match(appJs, /roughAddress: String\(order\.roughAddress/);
   for (const field of ["startTimeText", "lessonFrequency", "lessonDuration", "teacherGenderRequirement", "teacherEducationRequirement"]) {
     assert.match(appJs, new RegExp(`${field}: String\\(order\\.${field}`));
   }

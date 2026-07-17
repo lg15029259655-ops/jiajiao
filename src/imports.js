@@ -9,7 +9,8 @@ const MAX_WEB_IMPORT_ROWS = 200;
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 const REQUIRED_FIELDS = [
   ["grade", "年级"], ["subject", "科目"], ["area", "区域"], ["score", "当前成绩"],
-  ["lessonTime", "补习时间"], ["price", "报价"], ["address", "地址"]
+  ["lessonTime", "补习时间"], ["price", "报价"], ["roughAddress", "粗略地址"],
+  ["address", "详细地址"], ["parentWechat", "家长微信"]
 ];
 
 const FIELD_ALIASES = {
@@ -24,7 +25,8 @@ const FIELD_ALIASES = {
   lessonFrequency: ["教学频率", "补习频率", "上课频率", "lessonFrequency"],
   lessonDuration: ["每次时长", "单次时长", "lessonDuration"],
   price: ["报价", "课时费", "价格", "price"],
-  address: ["详细地址", "补习地址", "地址", "address"],
+  roughAddress: ["粗略地址", "补习地址", "地址", "位置", "roughAddress"],
+  address: ["详细地址", "具体地址", "门牌地址", "address"],
   requirement: ["对老师要求", "老师要求", "要求", "requirement"],
   teacherGenderRequirement: ["老师性别", "教师性别", "teacherGenderRequirement"],
   teacherEducationRequirement: ["学历要求", "老师学历", "teacherEducationRequirement"],

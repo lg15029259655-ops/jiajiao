@@ -23,9 +23,15 @@ function normalizePage(page) {
 }
 
 function assertRequiredOrderFields(data) {
-  const required = [["grade", "年级"], ["subject", "科目"], ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["price", "报价"], ["address", "地址"]];
+  const required = [["grade", "年级"], ["subject", "科目"], ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["price", "报价"], ["roughAddress", "粗略地址"], ["address", "详细地址"], ["parentWechat", "家长微信"]];
   const missing = required.filter(([key]) => !String(data[key] || "").trim()).map(([, label]) => label);
   if (missing.length) throw domainError("ORDER_FIELDS_REQUIRED", `请补全：${missing.join("、")}`, 400);
+}
+
+function assertPublishingActor(actor) {
+  if (actor?.role === "staff" && !String(actor.wechat || "").trim()) {
+    throw domainError("AGENT_WECHAT_REQUIRED", "请先在账号安全中填写中介微信，再发布订单", 400);
+  }
 }
 
 function placeholders(values, startAt) {
@@ -50,13 +56,13 @@ function buildTeacherOrderQuery(options = {}) {
   if (String(options.keyword || "").trim()) {
     values.push(`%${String(options.keyword).trim()}%`);
     const p = `$${values.length}`;
-    where.push(`(o.order_no ILIKE ${p} OR o.address ILIKE ${p} OR o.teacher_requirement ILIKE ${p})`);
+    where.push(`(o.order_no ILIKE ${p} OR o.rough_address ILIKE ${p} OR o.teacher_requirement ILIKE ${p})`);
   }
   values.push((normalizePage(options.page) - 1) * PAGE_SIZE);
   return {
     text: `SELECT o.id, o.order_no, o.status, o.student_gender, o.grade, o.subject, o.score,
       o.lesson_time, o.start_time_text, o.lesson_frequency, o.lesson_duration,
-      o.price, o.area, o.address, o.teacher_requirement, o.teacher_gender_requirement,
+      o.price, o.area, o.rough_address AS address, o.teacher_requirement, o.teacher_gender_requirement,
       o.teacher_education_requirement, o.created_at, o.updated_at,
       a.display_name AS agent_name, a.wechat AS agent_wechat, COUNT(*) OVER() AS total_count
       FROM orders o LEFT JOIN agents a ON a.id = o.agent_id
@@ -113,7 +119,7 @@ function mapOrder(row) {
     subject: row.subject || "", score: row.score || "", lessonTime: row.lesson_time || "",
     startTimeText: row.start_time_text || "", lessonFrequency: row.lesson_frequency || "", lessonDuration: row.lesson_duration || "",
     price: row.price || "",
-    area: row.area || "", address: row.address || "", requirement: row.teacher_requirement || "",
+    area: row.area || "", roughAddress: row.rough_address || row.address || "", address: row.address || "", requirement: row.teacher_requirement || "",
     teacherGenderRequirement: row.teacher_gender_requirement || "",
     teacherEducationRequirement: row.teacher_education_requirement || "",
     parentName: row.parent_name || "", parentPhone: row.parent_phone || "", parentWechat: row.parent_wechat || "",
@@ -641,6 +647,7 @@ function createRepository(pool) {
         actor = options;
         options = {};
       }
+      assertPublishingActor(actor);
       const selectedIds = options.mode === "selected" ? (options.itemIds || []).slice(0, 50) : null;
       return transaction(pool, async (client) => {
         await client.query("UPDATE import_batches SET status = 'publishing', updated_at = now() WHERE id = $1", [batchId]);
@@ -667,16 +674,16 @@ function createRepository(pool) {
           try {
             inserted = await client.query(`INSERT INTO orders (
               order_no, student_gender, grade, subject, score, lesson_time, start_time_text,
-              lesson_frequency, lesson_duration, price, area, address, teacher_requirement,
+              lesson_frequency, lesson_duration, price, area, rough_address, address, teacher_requirement,
               teacher_gender_requirement, teacher_education_requirement, parent_name, parent_phone,
               parent_wechat, internal_note, raw_text, agent_id, status, review_status, published_at,
               idempotency_key, import_batch_id
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-              'active','published',now(),$22,$23)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+              'active','published',now(),$23,$24)
             RETURNING id`, [
               orderNo, data.studentGender || null, data.grade, data.subject, data.score, data.lessonTime,
               data.startTimeText || null, data.lessonFrequency || null, data.lessonDuration || null, data.price,
-              data.area, data.address, data.requirement || null, data.teacherGenderRequirement || null,
+              data.area, data.roughAddress, data.address, data.requirement || null, data.teacherGenderRequirement || null,
               data.teacherEducationRequirement || null, data.parentName || null, data.parentPhone || null,
               data.parentWechat || null, data.internalNote || null, data.rawText || item.raw_text || null,
               actor.id, `import:${item.id}`, batchId
@@ -711,6 +718,7 @@ function createRepository(pool) {
       });
     },
     async createOrder(input, actor) {
+      assertPublishingActor(actor);
       return transaction(pool, async (client) => {
         if (input.idempotencyKey) {
           const existing = await client.query("SELECT o.* FROM orders o WHERE o.idempotency_key = $1 LIMIT 1", [input.idempotencyKey]);
@@ -729,16 +737,16 @@ function createRepository(pool) {
         try {
           inserted = await client.query(`INSERT INTO orders (
             order_no, student_gender, grade, subject, score, lesson_time, start_time_text,
-            lesson_frequency, lesson_duration, price, area, address, teacher_requirement,
+            lesson_frequency, lesson_duration, price, area, rough_address, address, teacher_requirement,
             teacher_gender_requirement, teacher_education_requirement, parent_name, parent_phone,
             parent_wechat, internal_note, raw_text, agent_id, status, review_status, published_at, idempotency_key
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-            'active','published',now(),$22)
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
+            'active','published',now(),$23)
           ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
           RETURNING *`, [
             orderNo, input.studentGender || null, input.grade.trim(), input.subject.trim(), input.score.trim(), input.lessonTime.trim(),
             input.startTimeText || null, input.lessonFrequency || null, input.lessonDuration || null, input.price.trim(),
-            input.area.trim(), input.address.trim(), input.requirement || null, input.teacherGenderRequirement || null,
+            input.area.trim(), input.roughAddress.trim(), input.address.trim(), input.requirement || null, input.teacherGenderRequirement || null,
             input.teacherEducationRequirement || null, input.parentName || null, input.parentPhone || null,
             input.parentWechat || null, input.internalNote || null, input.rawText || null,
             input.agentId || actor.id, input.idempotencyKey || null
@@ -773,7 +781,7 @@ function createRepository(pool) {
         const columnMap = {
           orderNo: "order_no", studentGender: "student_gender", grade: "grade", subject: "subject", score: "score",
           lessonTime: "lesson_time", startTimeText: "start_time_text", lessonFrequency: "lesson_frequency",
-          lessonDuration: "lesson_duration", price: "price", area: "area", address: "address", requirement: "teacher_requirement",
+          lessonDuration: "lesson_duration", price: "price", area: "area", roughAddress: "rough_address", address: "address", requirement: "teacher_requirement",
           teacherGenderRequirement: "teacher_gender_requirement", teacherEducationRequirement: "teacher_education_requirement",
           parentName: "parent_name", parentPhone: "parent_phone", parentWechat: "parent_wechat", internalNote: "internal_note",
           rawText: "raw_text", agentId: "agent_id"
@@ -783,7 +791,8 @@ function createRepository(pool) {
         assertRequiredOrderFields({
           grade: input.grade ?? current.grade, subject: input.subject ?? current.subject, area: input.area ?? current.area,
           score: input.score ?? current.score, lessonTime: input.lessonTime ?? current.lesson_time,
-          price: input.price ?? current.price, address: input.address ?? current.address
+          price: input.price ?? current.price, roughAddress: input.roughAddress ?? current.rough_address,
+          address: input.address ?? current.address, parentWechat: input.parentWechat ?? current.parent_wechat
         });
         const values = entries.map(([key]) => input[key] === "" ? null : input[key]);
         const assignments = entries.map(([, column], index) => `${column} = $${index + 2}`);
@@ -866,7 +875,7 @@ function createRepository(pool) {
 }
 
 module.exports = {
-  PAGE_SIZE, addImportToDuplicateIndex, allocateOrderNo, assertManualOrderNoAllowed, assertRequiredOrderFields, buildAgentOrderQuery,
+  PAGE_SIZE, addImportToDuplicateIndex, allocateOrderNo, assertManualOrderNoAllowed, assertPublishingActor, assertRequiredOrderFields, buildAgentOrderQuery,
   buildTeacherOrderQuery, createImportDuplicateIndex, createRepository, databaseDuplicateWarnings,
   duplicateWarningsFromIndex, mapAgent, mapImportItem, mapOrder, normalizePage,
   pendingImportItems, placeholders

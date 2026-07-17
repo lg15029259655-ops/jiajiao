@@ -15,7 +15,8 @@
     "db:restore": "node db/restore.js --dry-run",
     "db:import:dry-run": "node db/import-initial.js --dry-run",
     "db:import:stage": "node db/import-initial.js --stage",
-    "db:import:sample": "node db/generate-synthetic-import.js"
+    "db:import:sample": "node db/generate-synthetic-import.js",
+    "db:replace-demo": "node db/replace-demo-orders.js"
   },
   "dependencies": {
     "@fastify/cookie": "11.0.2",

@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { allocateOrderNo, assertManualOrderNoAllowed, createRepository } = require("../src/repository.js");
+const { allocateOrderNo, assertManualOrderNoAllowed, assertPublishingActor, assertRequiredOrderFields, createRepository } = require("../src/repository.js");
 
 test("automatic order numbers use a non-resetting database sequence", async () => {
   const calls = [];
@@ -24,6 +24,22 @@ test("manual order numbers cannot claim the automatic XJ namespace", () => {
     () => assertManualOrderNoAllowed("xj0000000001"),
     { code: "ORDER_NO_RESERVED" }
   );
+});
+
+test("new orders require both addresses and parent WeChat", () => {
+  const complete = {
+    grade: "初三", subject: "数学", area: "灞桥区", score: "80分", lessonTime: "周末",
+    price: "80元/小时", roughAddress: "纺织城附近", address: "林河春天8号楼", parentWechat: "demoParent06"
+  };
+  assert.doesNotThrow(() => assertRequiredOrderFields(complete));
+  for (const field of ["roughAddress", "address", "parentWechat"]) {
+    assert.throws(() => assertRequiredOrderFields({ ...complete, [field]: "" }), { code: "ORDER_FIELDS_REQUIRED" });
+  }
+});
+
+test("publishing staff must have intermediary WeChat", () => {
+  assert.doesNotThrow(() => assertPublishingActor({ id: "a1", role: "staff", active: true, wechat: "agent001" }));
+  assert.throws(() => assertPublishingActor({ id: "a1", role: "staff", active: true, wechat: "" }), { code: "AGENT_WECHAT_REQUIRED" });
 });
 
 function transactionPool(row) {
@@ -64,7 +80,7 @@ test("pausing requires teacher contact and writes one locked transition", async 
 });
 
 test("editing writes structured old and new values to the audit log", async () => {
-  const setup = transactionPool({ id: "o1", order_no: "071601", status: "active", version: 2, grade: "初二", subject: "数学", area: "雁塔区", address: "地址", lesson_time: "周末", price: "100元/小时" });
+  const setup = transactionPool({ id: "o1", order_no: "071601", status: "active", version: 2, grade: "初二", subject: "数学", area: "雁塔区", rough_address: "小寨附近", address: "小寨8号楼", parent_wechat: "demoParent07", lesson_time: "周末", price: "100元/小时" });
   const repository = createRepository(setup.pool);
   await repository.updateOrder("o1", { version: 2, score: "80分", price: "120元/小时", reason: "家长调整报价" }, { id: "a1", name: "中介A" });
   const audit = setup.calls.find((call) => /INSERT INTO order_logs/.test(call.text));
@@ -114,7 +130,8 @@ test("concurrent requests with one idempotency key return the winning order", as
   const repository = createRepository({ async connect() { return client; } });
   const order = await repository.createOrder({
     idempotencyKey: "same-concurrent-key", grade: "初二", subject: "数学", area: "雁塔区",
-    score: "80分", lessonTime: "周末", price: "100元/小时", address: "地址"
+    score: "80分", lessonTime: "周末", price: "100元/小时", roughAddress: "小寨附近",
+    address: "小寨8号楼", parentWechat: "demoParent08"
   }, { id: "a1", name: "中介A" });
 
   assert.equal(order.orderNo, "XJ0000000002");

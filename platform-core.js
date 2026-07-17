@@ -50,7 +50,9 @@
     { name: "score", label: "现阶段成绩" },
     { name: "lessonTime", label: "时间" },
     { name: "price", label: "报价" },
-    { name: "address", label: "地址" }
+    { name: "roughAddress", label: "粗略地址" },
+    { name: "address", label: "详细地址" },
+    { name: "parentWechat", label: "家长微信" }
   ];
 
   const STAFF_ACTIONS = {
@@ -261,9 +263,10 @@
     const subject = explicit("subject", ["补习科目", "辅导科目", "科目", "学科"])
       || inferred("subject", subjectMatches(compact).join("、"), { method: "dictionary" });
     let area = explicit("area", ["区域", "地区", "区县"]);
-    const address = explicit("address", ["详细地址", "补习地址", "地址", "位置"])
-      || inferred("address", guessAddress(compact, area), { method: "pattern" });
-    area = area || inferred("area", firstMatch(`${address} ${compact}`, FILTERS.areas), { method: "dictionary" });
+    const roughAddress = explicit("roughAddress", ["粗略地址", "补习地址", "地址", "位置"])
+      || inferred("roughAddress", guessAddress(compact, area), { method: "pattern" });
+    const address = explicit("address", ["详细地址", "具体地址", "门牌地址"]);
+    area = area || inferred("area", firstMatch(`${roughAddress} ${address} ${compact}`, FILTERS.areas), { method: "dictionary" });
     const price = explicit("price", ["报价", "课酬", "课时费", "价格", "费用"])
       || inferred("price", ((compact.match(/(\d+(?:\s*[~～至-]\s*\d+)?\s*(?:元|块)?\s*(?:\/|每|一)?\s*(?:次|课时|小时|时|h|H|月)[^，。；;]*)/) || [])[1] || ""), { method: "pattern" });
     const startTimeText = explicit("startTimeText", ["开始时间", "开课时间"]);
@@ -299,7 +302,7 @@
     else setParsedField(fields, fieldConfidence, fieldSources, "studentGender", studentGender, studentGender === "未说明" ? "low" : "medium", { method: "pattern" });
 
     const result = {
-      ...fields, orderNo, studentGender, grade, subject, area, score, lessonTime, price, address, requirement,
+      ...fields, orderNo, studentGender, grade, subject, area, score, lessonTime, price, roughAddress, address, requirement,
       startTimeText, lessonFrequency, lessonDuration, teacherGenderRequirement, teacherEducationRequirement,
       parentPhone, parentWechat, rawText: source
     };

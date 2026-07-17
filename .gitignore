@@ -9,3 +9,4 @@ data/
 backups/
 *.tutorbackup
 artifacts/
+.worktrees/

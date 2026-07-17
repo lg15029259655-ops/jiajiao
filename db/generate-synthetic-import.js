@@ -15,6 +15,7 @@ function createOrder(index) {
   const lines = [
     `编号：${String(990000 + index).padStart(6, "0")}`,
     `地址：西安市${area}${streets[position % streets.length]}测试点${index}附近`,
+    `详细地址：西安市${area}${streets[position % streets.length]}测试小区${index}号楼2单元`,
     `区域：${area}`,
     `科目：${subjects[(position * 3) % subjects.length]}`,
     `年级：${grades[position % grades.length]}`,
@@ -24,7 +25,8 @@ function createOrder(index) {
     `开始时间：${index % 3 === 0 ? "下周开始" : "可尽快开始"}`,
     `教学频率：每周${index % 3 === 0 ? 3 : 2}次`,
     `每次时长：${index % 4 === 0 ? "1.5小时" : "2小时"}`,
-    `补习时间：${times[position % times.length]}`
+    `补习时间：${times[position % times.length]}`,
+    `家长微信：syntheticParent${String(index).padStart(2, "0")}`
   ];
   if (index % 23 !== 0) lines.push(`课时费：${80 + (position % 8) * 10}元/小时`);
   if (index % 17 !== 0) lines.push(`当前成绩：${scores[position % scores.length]}`);

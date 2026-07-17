@@ -8,6 +8,8 @@ const importMigration = fs.readFileSync("./db/migrations/004_import_safety.sql",
 const constraintMigration = fs.readFileSync("./db/migrations/006_identity_and_status_constraints.sql", "utf8");
 const pipelineMigration = fs.readFileSync("./db/migrations/007_import_pipeline_and_followups.sql", "utf8");
 const numberingMigrationPath = "./db/migrations/008_order_number_sequence.sql";
+const addressPrivacyMigrationPath = "./db/migrations/009_address_privacy.sql";
+const snapshotImporter = fs.readFileSync("./db/migrate.js", "utf8");
 
 test("stability migration adds concurrency, sessions and import staging", () => {
   assert.match(migration, /schema_migrations/);
@@ -60,4 +62,19 @@ test("order numbering migration creates a global non-cycling bigint sequence", (
   assert.match(numberingMigration, /is_called/);
   assert.match(numberingMigration, /VALUES \(8,/);
   assert.doesNotMatch(numberingMigration, /DROP TABLE|DROP SEQUENCE/);
+});
+
+test("address privacy migration adds and safely backfills rough address", () => {
+  assert.equal(fs.existsSync(addressPrivacyMigrationPath), true);
+  const addressPrivacyMigration = fs.readFileSync(addressPrivacyMigrationPath, "utf8");
+  assert.match(addressPrivacyMigration, /ADD COLUMN IF NOT EXISTS rough_address TEXT/);
+  assert.match(addressPrivacyMigration, /UPDATE orders SET rough_address = area/);
+  assert.match(addressPrivacyMigration, /ALTER COLUMN rough_address SET NOT NULL/);
+  assert.match(addressPrivacyMigration, /VALUES \(9,/);
+  assert.doesNotMatch(addressPrivacyMigration, /DROP TABLE|DROP COLUMN/);
+});
+
+test("legacy snapshot import supplies rough address on a fresh database", () => {
+  assert.match(snapshotImporter, /area, rough_address, address/);
+  assert.match(snapshotImporter, /order\.roughAddress \|\| order\.area/);
 });

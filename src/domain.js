@@ -35,7 +35,7 @@ function publicOrder(order) {
     lessonDuration: order.lessonDuration || "",
     price: order.price || "",
     area: order.area || "",
-    address: order.address || "",
+    address: order.roughAddress || order.address || "",
     requirement: order.requirement || "",
     teacherGenderRequirement: order.teacherGenderRequirement || "",
     teacherEducationRequirement: order.teacherEducationRequirement || "",

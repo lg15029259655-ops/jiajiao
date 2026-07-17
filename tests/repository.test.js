@@ -10,6 +10,8 @@ test("teacher listing query is public, filtered and limited in PostgreSQL", () =
   assert.match(query.text, /o\.status = 'active'/);
   assert.match(query.text, /LIMIT 10 OFFSET/);
   assert.match(query.text, /COUNT\(\*\) OVER\(\)/);
+  assert.match(query.text, /o\.rough_address AS address/);
+  assert.doesNotMatch(query.text, /o\.address/);
   assert.doesNotMatch(query.text, /parent_phone|parent_wechat|internal_note|raw_text/);
   assert.deepEqual(query.values.slice(0, 4), [["初二"], ["%数学%"], ["雁塔区"], "%科技路%"]);
 });

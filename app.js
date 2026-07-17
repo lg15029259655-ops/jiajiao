@@ -523,7 +523,8 @@ function openImportItemEditor(item) {
   const data = item.parsedData || {};
   const fields = [["orderNo", "订单号"], ["studentGender", "学生性别"], ["grade", "年级"], ["subject", "科目"],
     ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["startTimeText", "开始时间"],
-    ["lessonFrequency", "教学频率"], ["lessonDuration", "每次时长"], ["price", "报价"], ["address", "地址"],
+    ["lessonFrequency", "教学频率"], ["lessonDuration", "每次时长"], ["price", "报价"],
+    ["roughAddress", "粗略地址"], ["address", "详细地址"],
     ["teacherGenderRequirement", "老师性别要求"], ["teacherEducationRequirement", "学历要求"],
     ["requirement", "其他要求"], ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]];
   const backdrop = document.createElement("div");
@@ -688,7 +689,8 @@ function publicRows(order) {
     ...(order.lessonFrequency ? [["教学频率", order.lessonFrequency]] : []),
     ...(order.lessonDuration ? [["每次时长", order.lessonDuration]] : []),
     ["报价", order.price],
-    ["地址", order.address],
+    ["粗略地址", order.roughAddress || order.address],
+    ["详细地址", order.address],
     ...(order.teacherGenderRequirement ? [["老师性别", order.teacherGenderRequirement]] : []),
     ...(order.teacherEducationRequirement ? [["学历要求", order.teacherEducationRequirement]] : []),
     ["对老师要求", order.requirement || "未说明"]
@@ -717,6 +719,7 @@ function teacherInfoRows(order) {
     ["学生", `${order.studentGender || "未说明"} · ${order.score || "成绩未说明"}`],
     ["时间", order.lessonTime || "未说明"],
     ["地址", order.address || "未说明"],
+    ["中介微信", `${order.agentName || "中介"} ${order.agentWechat || "未填写"}`.trim()],
     ["要求", order.requirement || "未说明"]
   ];
   return `<dl class="info teacher-detail-list">${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`;
@@ -793,6 +796,7 @@ async function submitOrder(event) {
     lessonFrequency: String(form.get("lessonFrequency") || "").trim(),
     lessonDuration: String(form.get("lessonDuration") || "").trim(),
     price: String(form.get("price") || "").trim(),
+    roughAddress: String(form.get("roughAddress") || "").trim(),
     address: String(form.get("address") || "").trim(),
     requirement: String(form.get("requirement") || "").trim(),
     teacherGenderRequirement: String(form.get("teacherGenderRequirement") || "").trim(),
@@ -1028,7 +1032,7 @@ function showParseReview(parsed) {
       : "明确标签已识别，关键字段齐全，请人工核对后发布。";
   document.querySelectorAll("#orderForm input, #orderForm textarea").forEach((field) => field.classList.remove("needs-review"));
   missing.forEach((name) => {
-    const fieldName = ({ 年级: "grade", 科目: "subject", 时间: "lessonTime", 报价: "price", 地址: "address" })[name];
+    const fieldName = core.REQUIRED_ORDER_FIELDS.find((field) => field.label === name)?.name;
     if (fieldName && document.querySelector(`[name="${fieldName}"]`)) document.querySelector(`[name="${fieldName}"]`).classList.add("needs-review");
   });
   uncertain.forEach((name) => {
@@ -1321,7 +1325,8 @@ function openOrderEditor(order) {
     ["area", "区域"], ["score", "当前成绩"], ["lessonTime", "补习时间"], ["startTimeText", "开始时间"],
     ["lessonFrequency", "教学频率"], ["lessonDuration", "每次时长"], ["price", "报价"],
     ["teacherGenderRequirement", "老师性别要求"], ["teacherEducationRequirement", "学历要求"],
-    ["address", "地址"], ["parentName", "家长称呼"], ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]
+    ["roughAddress", "粗略地址"], ["address", "详细地址"], ["parentName", "家长称呼"],
+    ["parentPhone", "家长电话"], ["parentWechat", "家长微信"]
   ];
   const backdrop = document.createElement("div");
   backdrop.className = "dialog-backdrop";
@@ -1586,7 +1591,8 @@ function normalizeOrder(order) {
     lessonFrequency: String(order.lessonFrequency || ""),
     lessonDuration: String(order.lessonDuration || ""),
     price: String(order.price || ""),
-    area: String(order.area || firstMatch(order.address, core.FILTERS.areas)),
+    area: String(order.area || firstMatch(order.roughAddress || order.address, core.FILTERS.areas)),
+    roughAddress: String(order.roughAddress || order.address || ""),
     address: String(order.address || ""),
     requirement: String(order.requirement || ""),
     teacherGenderRequirement: String(order.teacherGenderRequirement || ""),

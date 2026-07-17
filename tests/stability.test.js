@@ -31,13 +31,17 @@ test("teacher order projection omits private fields", () => {
     grade: "初二",
     subject: "数学",
     area: "雁塔区",
-    address: "公开地址",
+    roughAddress: "交大创新港附近",
+    address: "创新港小区8号楼2单元",
     parentPhone: "13900000000",
     parentWechat: "private",
     rawText: "private raw text",
     internalNote: "private note"
   });
   assert.equal(result.orderNo, "071601");
+  assert.equal(result.address, "交大创新港附近");
+  assert.equal(result.roughAddress, undefined);
+  assert.doesNotMatch(JSON.stringify(result), /创新港小区8号楼2单元/);
   assert.equal(result.parentPhone, undefined);
   assert.equal(result.parentWechat, undefined);
   assert.equal(result.rawText, undefined);

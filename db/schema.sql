@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS orders (
   lesson_duration TEXT,
   price TEXT NOT NULL,
   area TEXT NOT NULL,
+  rough_address TEXT NOT NULL,
   address TEXT NOT NULL,
   teacher_requirement TEXT,
   teacher_gender_requirement TEXT,
