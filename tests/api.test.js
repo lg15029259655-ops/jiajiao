@@ -29,7 +29,7 @@ function fakeRepository({ role = "staff", mustChangePassword = false } = {}) {
     async updateOrder(id, input, actor) { calls.push(["update", id, input, actor]); return { id, ...input, version: input.version + 1, status: "active" }; },
     async transitionOrder(id, input, actor) { calls.push(["status", id, input, actor]); return { id, status: input.status, version: input.version + 1 }; }
     ,async createImportBatch(input, actor) { calls.push(["import", input, actor]); return { id: "b1", totalCount: input.items.length, readyCount: input.items.length, needsReviewCount: 0 }; }
-    ,async getImportBatch() { return { items: [], page: 1, pageSize: 10, totalItems: 0, totalPages: 1 }; }
+    ,async getImportBatch(id, options) { calls.push(["import-list", id, options]); return { items: [], page: 1, pageSize: 10, totalItems: 0, totalPages: 1 }; }
     ,async updateImportItem(id, input) { calls.push(["import-update", id, input]); return { id, ...input }; }
     ,async publishImportBatch(id, options, actor) { calls.push(["import-publish", id, options, actor]); return { publishedCount: 1, skippedCount: 0, remainingCount: 0 }; }
     ,async correctOrder(id, input, actor) { calls.push(["correct", id, input, actor]); return { id, status: input.status, version: input.version + 1 }; }
@@ -139,6 +139,22 @@ test("text import is staged before publish", async () => {
   assert.equal(repository.calls[0][0], "import");
   assert.equal(repository.calls[1][0], "import-publish");
   assert.deepEqual(repository.calls[1][2], { itemIds: ["i1"], mode: "selected" });
+  await app.close();
+});
+
+test("pending-review listing excludes published import items by default", async () => {
+  const repository = fakeRepository();
+  const app = buildApp({ repository, serveFiles: false });
+  const { cookies } = await login(app);
+
+  const response = await app.inject({
+    method: "GET", url: "/api/agent/import-batches/b1?page=1", cookies
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(repository.calls[0], ["import-list", "b1", {
+    page: "1", keyword: "", reviewStatus: "pending"
+  }]);
   await app.close();
 });
 

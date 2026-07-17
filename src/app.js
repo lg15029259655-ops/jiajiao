@@ -293,7 +293,7 @@ function buildApp({
     return repository.getImportBatch(request.params.id, {
       page: request.query?.page || 1,
       keyword: request.query?.keyword || "",
-      reviewStatus: request.query?.reviewStatus || ""
+      reviewStatus: request.query?.reviewStatus || "pending"
     });
   });
 

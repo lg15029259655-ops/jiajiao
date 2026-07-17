@@ -582,7 +582,9 @@ function createRepository(pool) {
       const currentPage = normalizePage(options.page);
       const values = [batchId];
       const where = ["ii.batch_id = $1"];
-      if (["ready", "needs_review", "published"].includes(options.reviewStatus)) {
+      if (options.reviewStatus === "pending") {
+        where.push("ii.review_status IN ('ready', 'needs_review')");
+      } else if (["ready", "needs_review", "published"].includes(options.reviewStatus)) {
         values.push(options.reviewStatus);
         where.push(`ii.review_status = $${values.length}`);
       }
