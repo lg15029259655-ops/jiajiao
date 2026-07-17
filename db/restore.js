@@ -3,6 +3,7 @@ const path = require("node:path");
 const { createPool, transaction } = require("../src/database.js");
 const { decryptBackup, validateBackup } = require("./backup-format.js");
 const { TABLES } = require("./backup.js");
+const { loadEnvFile } = require("./neon.js");
 const SCHEMA_SQL = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
 const MIGRATIONS = fs.readdirSync(path.join(__dirname, "migrations")).filter((name) => name.endsWith(".sql")).sort()
   .map((name) => fs.readFileSync(path.join(__dirname, "migrations", name), "utf8"));
@@ -54,6 +55,7 @@ async function restoreIntoSchema(pool, payload, schema) {
 }
 
 async function main() {
+  loadEnvFile();
   const args = parseArguments(process.argv.slice(2));
   if (!args.file) throw new Error("Usage: node db/restore.js <backup-file> --dry-run");
   if (!process.env.BACKUP_ENCRYPTION_KEY) throw new Error("BACKUP_ENCRYPTION_KEY is required");

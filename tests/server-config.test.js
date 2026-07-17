@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const packageJson = require("../package.json");
 const appModule = require("../src/app.js");
 const { resolveHost } = require("../server.js");
-const { resolveAllowedOrigin } = appModule;
+const { resolveAllowedOrigin, resolveAllowedOrigins } = appModule;
 
 test("cloud runtime is pinned to Node 24 for ESM dependency compatibility", () => {
   assert.equal(packageJson.engines.node, "24.x");
@@ -61,5 +61,16 @@ test("Vercel production URL is converted to a trusted HTTPS origin", () => {
   assert.equal(
     resolveAllowedOrigin({ VERCEL_PROJECT_PRODUCTION_URL: "jiajiao.vercel.app" }),
     "https://jiajiao.vercel.app"
+  );
+});
+
+test("teacher and agent subdomains are both trusted when configured", () => {
+  assert.deepEqual(
+    resolveAllowedOrigins({
+      TEACHER_ORIGIN: "https://orders.example.com",
+      AGENT_ORIGIN: "https://agent.example.com",
+      APP_ORIGINS: "https://preview.example.com, https://agent.example.com"
+    }),
+    ["https://preview.example.com", "https://agent.example.com", "https://orders.example.com"]
   );
 });

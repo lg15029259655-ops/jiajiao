@@ -1,12 +1,14 @@
 const { buildApp } = require("./src/app.js");
 const { createPool } = require("./src/database.js");
 const { createRepository } = require("./src/repository.js");
+const { loadEnvFile } = require("./db/neon.js");
 
 function resolveHost(env = process.env) {
   return env.HOST || (env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
 }
 
 async function start() {
+  loadEnvFile();
   if (process.env.APP_MODE === "demo") {
     throw new Error("APP_MODE=demo requires the separate demo server and cannot use the production entry point");
   }

@@ -428,7 +428,12 @@ main {
 }
 
 .form textarea { grid-column: 1 / -1; }
-.manage-search { display: grid; grid-template-columns: 1fr 130px 150px; gap: 10px; margin-bottom: 14px; }
+.manage-search { display: grid; grid-template-columns: 1fr repeat(3, minmax(130px, 160px)); gap: 10px; margin-bottom: 14px; }
+.review-filters { display: grid; grid-template-columns: 1fr 180px; gap: 10px; margin-bottom: 14px; }
+.review-select { display: flex; align-items: center; gap: 7px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+.review-select input { width: 18px; min-height: 18px; }
+.followup-alert { margin: 10px 0; padding: 8px 10px; border-left: 3px solid var(--orange); background: #fff8ea; color: #7a4b00; font-size: 13px; }
+.followup-alert.critical { border-left-color: var(--red); background: #fff2f3; color: #9b2730; }
 .order-list { display: grid; gap: 18px; }
 .teacher-shell .order-list {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
@@ -469,85 +474,6 @@ main {
   padding: 16px;
   border-radius: 6px;
   box-shadow: none;
-}
-
-html[data-device="desktop"] main {
-  max-width: min(1500px, calc(100vw - 48px));
-  padding-left: 24px;
-  padding-right: 24px;
-}
-
-html[data-device="desktop"] .teacher-shell {
-  max-width: min(1500px, calc(100vw - 48px));
-}
-
-html[data-device="desktop"] .teacher-shell .order-list {
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-}
-
-html[data-device="desktop"] .agent-tabs {
-  display: inline-grid;
-  grid-template-columns: repeat(4, minmax(130px, 180px));
-  width: auto;
-  padding: 6px;
-}
-
-html[data-device="desktop"] .agent-tab {
-  min-height: 38px;
-  font-size: 14px;
-}
-
-html[data-device="desktop"] .agent-hero {
-  padding: 16px 18px;
-}
-
-html[data-device="desktop"] .agent-hero h1 {
-  font-size: 28px;
-}
-
-html[data-device="desktop"] .panel {
-  padding: 16px;
-}
-
-html[data-device="desktop"] .order-list {
-  gap: 12px;
-}
-
-html[data-device="desktop"] .order-card {
-  padding: 14px;
-}
-
-html[data-device="desktop"] .form {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-html[data-device="desktop"] #orderForm textarea,
-html[data-device="desktop"] #rawText {
-  grid-column: 1 / -1;
-}
-
-html[data-device="desktop"] .manage-search {
-  grid-template-columns: minmax(360px, 1fr) 128px 142px;
-}
-
-html[data-device="desktop"] .info {
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-@media (min-width: 981px) {
-  html[data-device="desktop"] .teacher-shell .order-list {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  }
-
-  html[data-device="desktop"] .agent-page.active {
-    display: block;
-  }
-
-  html[data-device="desktop"] .compact-form {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
 }
 
 .order-card::before {
@@ -869,7 +795,7 @@ html[data-device="desktop"] .info {
 .order-editor .duplicate-check { grid-template-columns: 22px 1fr; align-items: center; }
 .order-editor .duplicate-check input { min-height: 18px; width: 18px; }
 
-@media (max-width: 980px) {
+@media (max-width: 767px) {
   .staff-grid { grid-template-columns: 1fr; }
   .agent-workbench {
     grid-template-columns: 1fr;
@@ -881,7 +807,7 @@ html[data-device="desktop"] .info {
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   main { padding: 10px 10px 40px; }
   .topbar { min-height: 52px; padding: 8px 12px; }
   .brand-block { width: 100%; text-align: center; }
@@ -922,6 +848,7 @@ html[data-device="desktop"] .info {
   .chips span { min-height: 28px; padding: 0 8px; font-size: 12px; }
   .teacher-shell .order-list { grid-template-columns: 1fr; gap: 12px; }
   .form, .compact-form, .manage-search { grid-template-columns: 1fr; }
+  .review-filters { grid-template-columns: 1fr; }
   .order-card { padding: 14px 14px; }
   .teacher-shell .order-card { padding: 15px; }
   .card-head { align-items: flex-start; }
@@ -963,68 +890,36 @@ html[data-device="desktop"] .info {
   .page-summary { flex-basis: 100%; text-align: center; }
 }
 
-html[data-device="mobile"] .teacher-shell .order-list { grid-template-columns: 1fr; }
-html[data-device="mobile"] .form,
-html[data-device="mobile"] .compact-form,
-html[data-device="mobile"] .manage-search { grid-template-columns: 1fr; }
-html[data-device="mobile"] .order-editor .form { grid-template-columns: 1fr; }
-
-/* Desktop device override: preserve dense desktop controls in narrow desktop panes. */
-
-html[data-device="desktop"] main {
-  max-width: min(1500px, calc(100vw - 48px));
-  padding: 18px 24px 56px;
+@media (min-width: 768px) and (max-width: 1199px) {
+  main, .teacher-shell { max-width: calc(100vw - 32px); }
+  .teacher-shell .order-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .agent-workbench {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "entry manage" "account backup";
+  }
+  .form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-html[data-device="desktop"] .topbar {
-  min-height: 58px;
-  padding: 10px 18px;
-}
-
-html[data-device="desktop"] .brand-block {
-  width: auto;
-  text-align: left;
-}
-
-html[data-device="desktop"] .brand-block strong {
-  font-size: 20px;
-}
-
-html[data-device="desktop"] .teacher-filters {
-  top: 58px;
-  grid-template-columns: repeat(3, minmax(110px, 150px)) minmax(260px, 1fr);
-  gap: 10px;
-  padding: 10px;
-}
-
-html[data-device="desktop"] .teacher-filters input {
-  grid-column: auto;
-}
-
-html[data-device="desktop"] .teacher-shell .order-list {
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
-}
-
-html[data-device="desktop"] .teacher-card-head {
-  display: flex;
-  flex-direction: row;
-}
-
-html[data-device="desktop"] .form {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-html[data-device="desktop"] .compact-form {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-html[data-device="desktop"] .manage-search {
-  grid-template-columns: minmax(360px, 1fr) 128px 142px;
-}
-
-html[data-device="desktop"] .copy-row button,
-html[data-device="desktop"] .actions button,
-html[data-device="desktop"] .file-button {
-  flex: 0 0 auto;
+@media (min-width: 1200px) {
+  main, .teacher-shell { max-width: min(1500px, calc(100vw - 48px)); }
+  main { padding: 18px 24px 56px; }
+  .topbar { min-height: 58px; padding: 10px 18px; }
+  .teacher-filters {
+    top: 58px;
+    grid-template-columns: repeat(3, minmax(110px, 150px)) minmax(260px, 1fr);
+  }
+  .teacher-filters input { grid-column: auto; }
+  .teacher-shell .order-list { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .agent-tabs { display: inline-grid; grid-template-columns: repeat(4, minmax(130px, 180px)); width: auto; }
+  .agent-workbench {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas: "entry entry manage manage" "account account backup backup";
+  }
+  .form { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .compact-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .manage-search { grid-template-columns: minmax(320px, 1fr) repeat(3, minmax(125px, 150px)); }
+  .order-card, .panel { padding: 14px; }
+  .info { font-size: 14px; line-height: 1.45; }
+  .copy-row button, .actions button, .file-button { flex: 0 0 auto; }
 }

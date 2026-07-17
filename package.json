@@ -12,7 +12,10 @@
     "db:migrate": "node db/migrate.js",
     "db:anonymize": "node db/maintenance.js",
     "db:backup": "node db/backup.js",
-    "db:restore": "node db/restore.js --dry-run"
+    "db:restore": "node db/restore.js --dry-run",
+    "db:import:dry-run": "node db/import-initial.js --dry-run",
+    "db:import:stage": "node db/import-initial.js --stage",
+    "db:import:sample": "node db/generate-synthetic-import.js"
   },
   "dependencies": {
     "@fastify/cookie": "11.0.2",

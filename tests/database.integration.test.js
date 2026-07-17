@@ -61,7 +61,7 @@ test("Neon temporary schema supports migrations, SQL pagination and optimistic c
     assert.equal(batch.readyCount, 1);
     assert.equal(batch.needsReviewCount, 1);
     const published = await repository.publishImportBatch(batch.id, actor);
-    assert.deepEqual(published, { publishedCount: 1, skippedCount: 1 });
+    assert.deepEqual(published, { publishedCount: 1, skippedCount: 1, remainingCount: 0 });
 
     const freshData = { grade: "初三", subject: "英语", area: "高新区", score: "85分", lessonTime: "周日", price: "130元/小时", address: "发布前复查地址", parentPhone: "13933334444", rawText: "发布前复查订单" };
     const freshBatch = await repository.createImportBatch({ sourceType: "text", filename: "", items: [
@@ -72,7 +72,7 @@ test("Neon temporary schema supports migrations, SQL pagination and optimistic c
       (order_no, grade, subject, score, lesson_time, price, area, address, parent_phone, raw_text, status, review_status, published_at)
       VALUES ('FRESH-DUP', $1,$2,$3,$4,$5,$6,$7,$8,$9,'active','published',now())`,
       [freshData.grade, freshData.subject, freshData.score, freshData.lessonTime, freshData.price, freshData.area, freshData.address, freshData.parentPhone, freshData.rawText]);
-    assert.deepEqual(await repository.publishImportBatch(freshBatch.id, actor), { publishedCount: 0, skippedCount: 1 });
+    assert.deepEqual(await repository.publishImportBatch(freshBatch.id, actor), { publishedCount: 0, skippedCount: 1, remainingCount: 0 });
     const refreshedItem = await pool.query("SELECT review_status FROM import_items WHERE batch_id = $1", [freshBatch.id]);
     assert.equal(refreshedItem.rows[0].review_status, "needs_review");
 
@@ -89,7 +89,7 @@ test("Neon temporary schema supports migrations, SQL pagination and optimistic c
     assert.equal(page.totalItems, 5003);
     assert.equal(page.pageSize, 10);
     const versions = await pool.query("SELECT max(version)::int AS version FROM schema_migrations");
-    assert.equal(versions.rows[0].version, 6);
+    assert.equal(versions.rows[0].version, 7);
     const backup = await createBackup(pool);
     await restoreIntoSchema(admin, backup, restoreSchema);
     const restored = await admin.query(`SELECT count(*)::int AS count FROM ${restoreSchema}.orders`);

@@ -6,6 +6,7 @@ const migration = fs.readFileSync("./db/migrations/002_stabilize.sql", "utf8");
 const auditMigration = fs.readFileSync("./db/migrations/003_audit_and_privacy.sql", "utf8");
 const importMigration = fs.readFileSync("./db/migrations/004_import_safety.sql", "utf8");
 const constraintMigration = fs.readFileSync("./db/migrations/006_identity_and_status_constraints.sql", "utf8");
+const pipelineMigration = fs.readFileSync("./db/migrations/007_import_pipeline_and_followups.sql", "utf8");
 
 test("stability migration adds concurrency, sessions and import staging", () => {
   assert.match(migration, /schema_migrations/);
@@ -36,4 +37,15 @@ test("final constraints enforce five order states and cross-field login uniquene
   assert.match(constraintMigration, /enforce_agent_login_identity_uniqueness/);
   assert.match(constraintMigration, /pg_advisory_xact_lock/);
   assert.match(constraintMigration, /VALUES \(6,/);
+});
+
+test("pipeline migration stores parsing evidence, progress and follow-up timestamps", () => {
+  assert.match(pipelineMigration, /start_time_text/);
+  assert.match(pipelineMigration, /teacher_gender_requirement/);
+  assert.match(pipelineMigration, /field_confidence JSONB/);
+  assert.match(pipelineMigration, /field_sources JSONB/);
+  assert.match(pipelineMigration, /content_fingerprint/);
+  assert.match(pipelineMigration, /last_processed_row/);
+  assert.match(pipelineMigration, /lock_follow_up_at/);
+  assert.match(pipelineMigration, /VALUES \(7,/);
 });

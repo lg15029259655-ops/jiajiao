@@ -12,16 +12,19 @@ test("maintenance anonymizes terminal orders and removes expired sessions", asyn
       calls.push({ text, values });
       if (/UPDATE orders/.test(text)) return { rowCount: 4 };
       if (/UPDATE order_logs/.test(text)) return { rowCount: 9 };
+      if (/UPDATE import_items/.test(text)) return { rowCount: 6 };
       if (/DELETE FROM sessions/.test(text)) return { rowCount: 2 };
       return { rows: [] };
     }
   };
   const result = await runMaintenance(pool, new Date("2026-07-16T00:00:00Z"));
-  assert.deepEqual(result, { anonymizedOrders: 4, scrubbedAuditLogs: 9, deletedSessions: 2 });
+  assert.deepEqual(result, { anonymizedOrders: 4, scrubbedAuditLogs: 9, scrubbedImportItems: 6, deletedSessions: 2 });
   assert.match(calls[0].text, /parent_phone = NULL/);
   assert.match(calls[0].text, /interval '6 months'/);
   assert.match(calls[1].text, /changes = changes - ARRAY/);
   assert.match(calls[1].text, /reason = NULL/);
+  assert.match(calls[2].text, /raw_text = NULL/);
+  assert.match(calls[2].text, /published_order_id/);
 });
 
 test("backup payload is encrypted and authenticated", () => {

@@ -135,10 +135,15 @@
       subject: valueOrEmpty(order.subject),
       score: valueOrEmpty(order.score),
       lessonTime: valueOrEmpty(order.lessonTime),
+      startTimeText: valueOrEmpty(order.startTimeText),
+      lessonFrequency: valueOrEmpty(order.lessonFrequency),
+      lessonDuration: valueOrEmpty(order.lessonDuration),
       price: valueOrEmpty(order.price),
       area: valueOrEmpty(order.area),
       address: valueOrEmpty(order.address),
       requirement: valueOrEmpty(order.requirement),
+      teacherGenderRequirement: valueOrEmpty(order.teacherGenderRequirement),
+      teacherEducationRequirement: valueOrEmpty(order.teacherEducationRequirement),
       agentName: valueOrEmpty(order.agentName),
       agentWechat: valueOrEmpty(order.agentWechat),
       createdAt: valueOrEmpty(order.createdAt),
@@ -232,41 +237,141 @@
   }
 
   function parseOrderText(text) {
-    const source = String(text || "").replace(/\r/g, "").trim();
+    const source = cleanOrderText(text);
     const compact = source.replace(/\s+/g, " ");
-    const label = (...names) => labelValue(source, names);
-    const orderNo = label("订单编号", "订单号", "编号") || ((source.match(/(?:订单(?:编号|号)?|编号)\s*[：:]?\s*(\d{5,12})/) || [])[1] || "");
-    const grade = label("学生年级", "年级") || firstMatch(compact, FILTERS.grades);
-    const subject = label("补习科目", "科目", "学科") || subjectMatches(compact).join("、");
-    const area = label("区域", "地区") || firstMatch(compact, FILTERS.areas);
-    const address = label("地址", "位置") || guessAddress(compact, area);
-    const price = label("报价", "课酬", "价格", "费用") || ((compact.match(/(\d+\s*(?:元|块)?\s*(?:\/|每|一)?\s*(?:小时|时|h|H)[^，。；;]*)/) || [])[1] || "");
-    const lessonTime = label("补习时间", "上课时间", "课时", "时间") || guessTime(compact);
-    const requirement = label("对老师要求", "老师要求", "要求") || guessRequirement(compact);
-    const score = label("现阶段成绩", "成绩");
-    const parentPhone = label("家长电话", "电话", "手机号") || ((compact.match(/1\d{10}/) || [])[0] || "");
-    const parentWechat = label("家长微信", "微信");
-    const genderText = label("学生性别", "性别") || compact;
+    const fields = {};
+    const fieldConfidence = {};
+    const fieldSources = {};
+    const explicit = (field, names) => {
+      const hit = labelDetail(source, names);
+      if (hit.value) setParsedField(fields, fieldConfidence, fieldSources, field, hit.value, "high", hit);
+      return hit.value;
+    };
+    const inferred = (field, value, detail = {}) => {
+      if (!fields[field] && value) setParsedField(fields, fieldConfidence, fieldSources, field, value, "medium", detail);
+      return fields[field] || "";
+    };
+
+    const orderNoRaw = explicit("orderNo", ["订单编号", "订单号", "编号"])
+      || inferred("orderNo", ((source.match(/(?:订单(?:编号|号)?|编号)\s*[：:]?\s*(\d{5,12})/) || [])[1] || ""), { method: "pattern" });
+    const orderNo = ((String(orderNoRaw).match(/\d{5,12}/) || [])[0] || orderNoRaw);
+    fields.orderNo = orderNo;
+    const grade = explicit("grade", ["学生年级", "年级"])
+      || inferred("grade", firstMatch(compact, FILTERS.grades), { method: "dictionary" });
+    const subject = explicit("subject", ["补习科目", "辅导科目", "科目", "学科"])
+      || inferred("subject", subjectMatches(compact).join("、"), { method: "dictionary" });
+    let area = explicit("area", ["区域", "地区", "区县"]);
+    const address = explicit("address", ["详细地址", "补习地址", "地址", "位置"])
+      || inferred("address", guessAddress(compact, area), { method: "pattern" });
+    area = area || inferred("area", firstMatch(`${address} ${compact}`, FILTERS.areas), { method: "dictionary" });
+    const price = explicit("price", ["报价", "课酬", "课时费", "价格", "费用"])
+      || inferred("price", ((compact.match(/(\d+(?:\s*[~～至-]\s*\d+)?\s*(?:元|块)?\s*(?:\/|每|一)?\s*(?:次|课时|小时|时|h|H|月)[^，。；;]*)/) || [])[1] || ""), { method: "pattern" });
+    const startTimeText = explicit("startTimeText", ["开始时间", "开课时间"]);
+    const lessonFrequency = explicit("lessonFrequency", ["教学频率", "补习频率", "辅导频率", "上课频率", "每周次数"]);
+    const lessonDuration = explicit("lessonDuration", ["每次时长", "单次时长"]);
+    let lessonTime = explicit("lessonTime", ["补习时间", "辅导时间", "上课时间", "时间"]);
+    if (!lessonTime) {
+      const structuredTime = [startTimeText, lessonFrequency, lessonDuration].filter(Boolean).join("；");
+      lessonTime = structuredTime
+        ? setParsedField(fields, fieldConfidence, fieldSources, "lessonTime", structuredTime, "high", { method: "structured-labels" })
+        : inferred("lessonTime", guessTime(compact), { method: "pattern" });
+    }
+    const teacherGenderRequirement = explicit("teacherGenderRequirement", ["老师性别", "教师性别"]);
+    const teacherEducationRequirement = explicit("teacherEducationRequirement", ["学历要求", "老师学历", "教师学历"]);
+    let requirement = explicit("requirement", ["其他要求", "对老师要求", "老师要求", "教师要求", "要求"]);
+    if (!requirement) {
+      const structuredRequirement = [
+        teacherGenderRequirement && `老师性别：${teacherGenderRequirement}`,
+        teacherEducationRequirement && `学历要求：${teacherEducationRequirement}`
+      ].filter(Boolean).join("；");
+      requirement = structuredRequirement
+        ? setParsedField(fields, fieldConfidence, fieldSources, "requirement", structuredRequirement, "high", { method: "structured-labels" })
+        : inferred("requirement", guessRequirement(compact), { method: "pattern" });
+    }
+    const score = explicit("score", ["现阶段成绩", "当前成绩", "成绩"]);
+    const parentPhone = explicit("parentPhone", ["家长电话", "联系电话", "电话", "手机号"])
+      || inferred("parentPhone", ((compact.match(/1\d{10}/) || [])[0] || ""), { method: "pattern" });
+    const parentWechat = explicit("parentWechat", ["家长微信", "微信"]);
+    const explicitGender = explicit("studentGender", ["学生性别", "性别"]);
+    const genderText = explicitGender || compact;
     const studentGender = genderText.includes("女") ? "女孩" : genderText.includes("男") ? "男孩" : "未说明";
-    return { orderNo, studentGender, grade, subject, area, score, lessonTime, price, address, requirement, parentPhone, parentWechat, rawText: source };
+    if (explicitGender) setParsedField(fields, fieldConfidence, fieldSources, "studentGender", studentGender, "high", fieldSources.studentGender);
+    else setParsedField(fields, fieldConfidence, fieldSources, "studentGender", studentGender, studentGender === "未说明" ? "low" : "medium", { method: "pattern" });
+
+    const result = {
+      ...fields, orderNo, studentGender, grade, subject, area, score, lessonTime, price, address, requirement,
+      startTimeText, lessonFrequency, lessonDuration, teacherGenderRequirement, teacherEducationRequirement,
+      parentPhone, parentWechat, rawText: source
+    };
+    for (const key of Object.keys(result)) {
+      if (key === "rawText") continue;
+      if (!fieldConfidence[key]) fieldConfidence[key] = result[key] ? "medium" : "low";
+    }
+    return { ...result, fieldConfidence, fieldSources };
   }
 
-  function labelValue(source, names) {
+  function cleanOrderText(value) {
+    return String(value || "")
+      .normalize("NFKC")
+      .replace(/\r/g, "")
+      .replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, "")
+      .split("\n")
+      .map((line) => line.replace(/^[\s🎉🎊✨🔥📌✅]+/u, "").trimEnd())
+      .join("\n")
+      .trim();
+  }
+
+  function splitOrderText(value) {
+    const source = cleanOrderText(value);
+    if (!source) return [];
+    const lines = source.split("\n");
+    const chunks = [];
+    let current = [];
+    let seenOrderNumber = false;
+    for (const line of lines) {
+      const boundary = /(?:订单编号|订单号|编号)\s*[:：]?\s*\d{5,12}/.test(line);
+      if (boundary && seenOrderNumber && current.some((item) => item.trim())) {
+        chunks.push(current.join("\n").trim());
+        current = [];
+      }
+      if (boundary) seenOrderNumber = true;
+      current.push(line);
+    }
+    if (current.some((item) => item.trim())) chunks.push(current.join("\n").trim());
+    if (chunks.length > 1) return chunks;
+    return source.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  function setParsedField(fields, confidence, sources, field, value, level, detail = {}) {
+    const normalized = String(value || "").trim();
+    fields[field] = normalized;
+    confidence[field] = normalized ? level : "low";
+    if (normalized) sources[field] = detail;
+    return normalized;
+  }
+
+  function labelDetail(source, names) {
     const lines = String(source || "").split(/\n+/);
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
+    let offset = 0;
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index].trim();
       for (const name of names) {
         const pattern = new RegExp(`^\\s*(?:【|\\[)?\\s*${escapeRegExp(name)}\\s*(?:】|\\])?\\s*[：:]\\s*(.+)$`, "i");
         const match = line.match(pattern);
-        if (match) return match[1].trim();
+        if (match) return { value: match[1].trim(), label: name, line: index + 1, start: offset, end: offset + lines[index].length };
       }
+      offset += lines[index].length + 1;
     }
     for (const name of names) {
       const pattern = new RegExp(`${escapeRegExp(name)}\\s*[：:]\\s*([^\\n，。；;]+)`, "i");
       const match = source.match(pattern);
-      if (match) return match[1].trim();
+      if (match) return { value: match[1].trim(), label: name, line: null, start: match.index, end: match.index + match[0].length };
     }
-    return "";
+    return { value: "" };
+  }
+
+  function labelValue(source, names) {
+    return labelDetail(source, names).value;
   }
 
   function firstMatch(text, list) {
@@ -386,6 +491,7 @@
     nextOrderNo,
     paginate,
     parseOrderText,
+    splitOrderText,
     publicOrder,
     queryArchivedOrders,
     queryReviewOrders,

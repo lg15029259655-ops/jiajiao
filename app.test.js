@@ -34,8 +34,15 @@ test("production pages are API-only and contain no demo credentials or inquiry U
   assert.doesNotMatch(appJs, /nextStatus === "archived"/);
   assert.match(appJs, /visibleOrders/);
   assert.match(appJs, /idempotency-key/);
-  assert.match(styles, /@media \(max-width: 720px\)/);
+  assert.doesNotMatch(appJs, /navigator\.userAgent|maxTouchPoints|data-device/);
+  assert.doesNotMatch(styles, /html\[data-device=/);
+  assert.match(styles, /@media \(max-width: 767px\)/);
+  assert.match(styles, /@media \(min-width: 768px\) and \(max-width: 1199px\)/);
+  assert.match(styles, /@media \(min-width: 1200px\)/);
   assert.match(styles, /loading-card/);
+  for (const field of ["startTimeText", "lessonFrequency", "lessonDuration", "teacherGenderRequirement", "teacherEducationRequirement"]) {
+    assert.match(appJs, new RegExp(`${field}: String\\(order\\.${field}`));
+  }
 });
 
 test("database configuration keeps TLS parameters and requires explicit cloud mode", () => {

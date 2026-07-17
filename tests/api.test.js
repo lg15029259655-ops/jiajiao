@@ -31,7 +31,7 @@ function fakeRepository({ role = "staff", mustChangePassword = false } = {}) {
     ,async createImportBatch(input, actor) { calls.push(["import", input, actor]); return { id: "b1", totalCount: input.items.length, readyCount: input.items.length, needsReviewCount: 0 }; }
     ,async getImportBatch() { return { items: [], page: 1, pageSize: 10, totalItems: 0, totalPages: 1 }; }
     ,async updateImportItem(id, input) { calls.push(["import-update", id, input]); return { id, ...input }; }
-    ,async publishImportBatch(id, actor) { calls.push(["import-publish", id, actor]); return { publishedCount: 1, skippedCount: 0 }; }
+    ,async publishImportBatch(id, options, actor) { calls.push(["import-publish", id, options, actor]); return { publishedCount: 1, skippedCount: 0, remainingCount: 0 }; }
     ,async correctOrder(id, input, actor) { calls.push(["correct", id, input, actor]); return { id, status: input.status, version: input.version + 1 }; }
   };
 }
@@ -126,12 +126,16 @@ test("text import is staged before publish", async () => {
     method: "POST", url: "/api/agent/import-batches", cookies,
     payload: { sourceType: "text", content: "年级：初二\n科目：数学\n区域：雁塔区\n成绩：80分\n补习时间：周末\n报价：100元/小时\n地址：小寨" }
   });
-  const published = await app.inject({ method: "POST", url: "/api/agent/import-batches/b1/publish", cookies });
+  const published = await app.inject({
+    method: "POST", url: "/api/agent/import-batches/b1/publish", cookies,
+    payload: { itemIds: ["i1"], mode: "selected" }
+  });
   assert.equal(staged.statusCode, 201);
   assert.equal(staged.json().batch.totalCount, 1);
   assert.equal(published.statusCode, 200);
   assert.equal(repository.calls[0][0], "import");
   assert.equal(repository.calls[1][0], "import-publish");
+  assert.deepEqual(repository.calls[1][2], { itemIds: ["i1"], mode: "selected" });
   await app.close();
 });
 
@@ -158,6 +162,53 @@ test("static frontend routes register without exposing arbitrary project files",
   assert.equal(teacher.statusCode, 200);
   assert.match(teacher.headers["content-type"], /text\/html/);
   assert.equal(environment.statusCode, 404);
+  await app.close();
+});
+
+test("configured teacher and agent hosts cannot open each other's surfaces", async () => {
+  const app = buildApp({
+    repository: fakeRepository(),
+    serveFiles: true,
+    teacherHost: "orders.example.com",
+    agentHost: "agent.example.com"
+  });
+
+  const teacherHome = await app.inject({ method: "GET", url: "/", headers: { host: "orders.example.com" } });
+  const teacherBlocked = await app.inject({ method: "GET", url: "/agent.html", headers: { host: "orders.example.com" } });
+  const agentHome = await app.inject({ method: "GET", url: "/", headers: { host: "agent.example.com" } });
+  const agentBlocked = await app.inject({ method: "GET", url: "/teacher.html", headers: { host: "agent.example.com" } });
+  const agentApiBlocked = await app.inject({ method: "POST", url: "/api/agent/login", headers: { host: "orders.example.com" }, payload: {} });
+
+  assert.equal(teacherHome.statusCode, 200);
+  assert.match(teacherHome.body, /data-page="teacher"/);
+  assert.equal(teacherBlocked.statusCode, 404);
+  assert.equal(agentHome.statusCode, 200);
+  assert.match(agentHome.body, /data-page="agent"/);
+  assert.equal(agentBlocked.statusCode, 404);
+  assert.equal(agentApiBlocked.statusCode, 404);
+  await app.close();
+});
+
+test("production accepts both configured application origins", async () => {
+  const app = buildApp({
+    repository: fakeRepository(),
+    serveFiles: false,
+    production: true,
+    allowedOrigins: ["https://orders.example.com", "https://agent.example.com"]
+  });
+  const teacherOrigin = await app.inject({
+    method: "POST", url: "/api/agent/login", headers: { origin: "https://orders.example.com" }, payload: {}
+  });
+  const agentOrigin = await app.inject({
+    method: "POST", url: "/api/agent/login", headers: { origin: "https://agent.example.com" }, payload: {}
+  });
+  const rejected = await app.inject({
+    method: "POST", url: "/api/agent/login", headers: { origin: "https://evil.example.com" }, payload: {}
+  });
+  assert.notEqual(teacherOrigin.json().error?.code, "ORIGIN_REJECTED");
+  assert.notEqual(agentOrigin.json().error?.code, "ORIGIN_REJECTED");
+  assert.equal(rejected.statusCode, 403);
+  assert.equal(rejected.json().error.code, "ORIGIN_REJECTED");
   await app.close();
 });
 

@@ -8,6 +8,7 @@ const multipart = require("@fastify/multipart");
 const { needsPasswordUpgrade, hashPassword, sessionToken, tokenDigest, verifyPassword } = require("./security.js");
 const { domainError, publicOrder } = require("./domain.js");
 const { MAX_IMPORT_BYTES, parseCsvBuffer, parseSpreadsheetBuffer, parseTextItems } = require("./imports.js");
+const { isTransientDatabaseError } = require("./database.js");
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
@@ -23,7 +24,38 @@ function resolveAllowedOrigin(env = process.env) {
   return undefined;
 }
 
-function buildApp({ repository, serveFiles = true, production = process.env.NODE_ENV === "production", allowedOrigin = resolveAllowedOrigin() } = {}) {
+function resolveAllowedOrigins(env = process.env) {
+  const configured = [
+    ...String(env.APP_ORIGINS || "").split(","),
+    env.AGENT_ORIGIN,
+    env.TEACHER_ORIGIN
+  ].map(normalizeOrigin).filter(Boolean);
+  if (configured.length) return [...new Set(configured)];
+  const fallback = normalizeOrigin(resolveAllowedOrigin(env));
+  return fallback ? [fallback] : [];
+}
+
+function normalizeOrigin(value) {
+  return String(value || "").trim().replace(/\/$/, "");
+}
+
+function hostFromOrigin(value) {
+  try { return new URL(value).host; } catch { return ""; }
+}
+
+function requestHost(request) {
+  return String(request.headers.host || "").trim().toLowerCase();
+}
+
+function buildApp({
+  repository,
+  serveFiles = true,
+  production = process.env.NODE_ENV === "production",
+  allowedOrigin,
+  allowedOrigins = allowedOrigin ? [allowedOrigin] : resolveAllowedOrigins(),
+  teacherHost = process.env.TEACHER_HOST || hostFromOrigin(process.env.TEACHER_ORIGIN),
+  agentHost = process.env.AGENT_HOST || hostFromOrigin(process.env.AGENT_ORIGIN)
+} = {}) {
   if (!repository) throw new Error("repository is required");
   const app = Fastify({ logger: false, trustProxy: production, requestIdHeader: "x-request-id", bodyLimit: MAX_IMPORT_BYTES });
   const cookieName = production ? "__Host-tutor-session" : "tutor-session";
@@ -32,6 +64,26 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
   app.register(cookie);
   app.register(rateLimit, { global: false });
   app.register(multipart, { limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 5 } });
+
+  const trustedOrigins = new Set((allowedOrigins || []).map(normalizeOrigin).filter(Boolean));
+  const normalizedTeacherHost = String(teacherHost || "").trim().toLowerCase();
+  const normalizedAgentHost = String(agentHost || "").trim().toLowerCase();
+
+  app.addHook("onRequest", async (request) => {
+    if (normalizedTeacherHost || normalizedAgentHost) {
+      const host = requestHost(request);
+      const pathname = String(request.url || "").split("?", 1)[0];
+      const teacherOnlyPath = pathname === "/teacher.html" || pathname.startsWith("/api/teacher/");
+      const agentOnlyPath = pathname === "/agent.html" || pathname.startsWith("/api/agent/") || pathname.startsWith("/api/admin/");
+      if ((host === normalizedTeacherHost && agentOnlyPath) || (host === normalizedAgentHost && teacherOnlyPath)) {
+        throw domainError("HOST_ROUTE_NOT_FOUND", "Page not found", 404);
+      }
+    }
+    if (production && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      const origin = normalizeOrigin(request.headers.origin);
+      if (!origin || !trustedOrigins.has(origin)) throw domainError("ORIGIN_REJECTED", "Request origin is not trusted", 403);
+    }
+  });
 
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("x-content-type-options", "nosniff");
@@ -42,15 +94,11 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
     return payload;
   });
 
-  app.addHook("preHandler", async (request) => {
-    if (!production || ["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
-    const origin = request.headers.origin;
-    if (!allowedOrigin || origin !== allowedOrigin) throw domainError("ORIGIN_REJECTED", "请求来源不受信任", 403);
-  });
-
   app.setErrorHandler((error, request, reply) => {
-    const statusCode = Number(error.statusCode || 500);
-    const code = error.code && !String(error.code).startsWith("FST_") ? error.code : (statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_INVALID");
+    const databaseUnavailable = isTransientDatabaseError(error);
+    const statusCode = databaseUnavailable ? 503 : Number(error.statusCode || 500);
+    const code = databaseUnavailable ? "DATABASE_UNAVAILABLE" :
+      (error.code && !String(error.code).startsWith("FST_") ? error.code : (statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_INVALID"));
     if (statusCode >= 500) console.error(`[${request.id}]`, error.code || error.message);
     reply.code(statusCode).send({ error: { code, message: statusCode >= 500 ? "服务暂时不可用，请稍后重试" : error.message, requestId: request.id } });
   });
@@ -172,7 +220,10 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
 
   app.get("/api/agent/orders", { preHandler: requirePasswordChanged }, async (request) => {
     const query = request.query || {};
-    return repository.listAgentOrders({ scope: query.scope || "working", status: query.status || "", keyword: query.keyword || "", page: query.page || 1 });
+    return repository.listAgentOrders({
+      scope: query.scope || "working", status: query.status || "", followup: query.followup || "",
+      keyword: query.keyword || "", page: query.page || 1
+    });
   });
 
   app.post("/api/agent/orders", { preHandler: requireStaff }, async (request, reply) => {
@@ -239,7 +290,11 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
   });
 
   app.get("/api/agent/import-batches/:id", { preHandler: requireStaff }, async (request) => {
-    return repository.getImportBatch(request.params.id, request.query?.page || 1);
+    return repository.getImportBatch(request.params.id, {
+      page: request.query?.page || 1,
+      keyword: request.query?.keyword || "",
+      reviewStatus: request.query?.reviewStatus || ""
+    });
   });
 
   app.patch("/api/agent/import-items/:id", { preHandler: requireStaff }, async (request) => {
@@ -248,11 +303,18 @@ function buildApp({ repository, serveFiles = true, production = process.env.NODE
   });
 
   app.post("/api/agent/import-batches/:id/publish", { preHandler: requireStaff }, async (request) => {
-    return repository.publishImportBatch(request.params.id, request.agent);
+    const body = request.body || {};
+    const itemIds = Array.isArray(body.itemIds) ? body.itemIds.map(String).filter(Boolean).slice(0, 50) : [];
+    const mode = body.mode === "selected" ? "selected" : "ready";
+    if (mode === "selected" && !itemIds.length) throw domainError("IMPORT_ITEMS_REQUIRED", "请选择要发布的记录", 400);
+    return repository.publishImportBatch(request.params.id, { itemIds, mode }, request.agent);
   });
 
   if (serveFiles) {
-    app.get("/", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.teacherHtml));
+    app.get("/", async (request, reply) => {
+      const html = normalizedAgentHost && requestHost(request) === normalizedAgentHost ? publicFiles.agentHtml : publicFiles.teacherHtml;
+      return reply.type("text/html; charset=utf-8").send(html);
+    });
     app.get("/teacher.html", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.teacherHtml));
     app.get("/agent.html", async (_request, reply) => reply.type("text/html; charset=utf-8").send(publicFiles.agentHtml));
     app.get("/app.js", async (_request, reply) => reply.type("application/javascript; charset=utf-8").send(publicFiles.appScript));
@@ -325,4 +387,7 @@ async function handleVercelRequest(request, response) {
 }
 
 module.exports = handleVercelRequest;
-Object.assign(module.exports, { buildApp, createTemporaryPassword, csvCell, loadPublicFiles, requireVersion, resolveAllowedOrigin, sanitizeAgent });
+Object.assign(module.exports, {
+  buildApp, createTemporaryPassword, csvCell, loadPublicFiles, requireVersion,
+  resolveAllowedOrigin, resolveAllowedOrigins, sanitizeAgent
+});

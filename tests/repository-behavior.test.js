@@ -3,6 +3,50 @@ const assert = require("node:assert/strict");
 
 const { createRepository } = require("../src/repository.js");
 
+test("resume filtering skips rows already processed or already staged", () => {
+  const { pendingImportItems } = require("../src/repository.js");
+  const items = [1, 2, 3, 4, 5].map((rowNumber) => ({ rowNumber }));
+  assert.deepEqual(
+    pendingImportItems(items, 2, [4]).map((item) => item.rowNumber),
+    [3, 5]
+  );
+});
+
+test("batch duplicate lookup uses reusable indexes", () => {
+  const { addImportToDuplicateIndex, createImportDuplicateIndex, duplicateWarningsFromIndex } = require("../src/repository.js");
+  const index = createImportDuplicateIndex();
+  addImportToDuplicateIndex(index, {
+    orderNo: "001426", parentPhone: "13900000000", address: "小寨", grade: "初二", subject: "数学", rawText: "原始订单"
+  });
+  assert.ok(duplicateWarningsFromIndex({ orderNo: "001426" }, index).length > 0);
+  assert.ok(duplicateWarningsFromIndex({ parentPhone: "13900000000" }, index).length > 0);
+  assert.ok(duplicateWarningsFromIndex({ address: "小寨", grade: "初二", subject: "数学" }, index).length > 0);
+  assert.ok(duplicateWarningsFromIndex({ rawText: "原始订单" }, index).length > 0);
+});
+
+test("agent query exposes lock and stale reminders without changing order status", () => {
+  const { buildAgentOrderQuery } = require("../src/repository.js");
+  const statement = buildAgentOrderQuery({ scope: "working", followup: "lockOverdue", page: 1 });
+  assert.match(statement.text, /lock_follow_up_at <= now\(\)/);
+  assert.doesNotMatch(statement.text, /UPDATE orders/);
+});
+
+test("mapped orders include structured lesson fields and reminder levels", async () => {
+  const pool = {
+    async query() {
+      return { rows: [{
+        id: "o1", order_no: "001426", status: "paused", grade: "初二", subject: "数学",
+        start_time_text: "7月中旬", lesson_frequency: "每周2次", lesson_duration: "2h",
+        teacher_gender_requirement: "女", teacher_education_requirement: "大学生",
+        lock_follow_up_at: new Date(Date.now() - 1000), total_count: "1"
+      }] };
+    }
+  };
+  const result = await createRepository(pool).listTeacherOrders({ page: 1 });
+  assert.equal(result.items[0].startTimeText, "7月中旬");
+  assert.equal(result.items[0].lessonFrequency, "每周2次");
+});
+
 test("repository maps paginated teacher rows without loading the full database", async () => {
   const calls = [];
   const pool = {
