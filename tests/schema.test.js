@@ -7,6 +7,7 @@ const auditMigration = fs.readFileSync("./db/migrations/003_audit_and_privacy.sq
 const importMigration = fs.readFileSync("./db/migrations/004_import_safety.sql", "utf8");
 const constraintMigration = fs.readFileSync("./db/migrations/006_identity_and_status_constraints.sql", "utf8");
 const pipelineMigration = fs.readFileSync("./db/migrations/007_import_pipeline_and_followups.sql", "utf8");
+const numberingMigrationPath = "./db/migrations/008_order_number_sequence.sql";
 
 test("stability migration adds concurrency, sessions and import staging", () => {
   assert.match(migration, /schema_migrations/);
@@ -48,4 +49,15 @@ test("pipeline migration stores parsing evidence, progress and follow-up timesta
   assert.match(pipelineMigration, /last_processed_row/);
   assert.match(pipelineMigration, /lock_follow_up_at/);
   assert.match(pipelineMigration, /VALUES \(7,/);
+});
+
+test("order numbering migration creates a global non-cycling bigint sequence", () => {
+  assert.equal(fs.existsSync(numberingMigrationPath), true);
+  const numberingMigration = fs.readFileSync(numberingMigrationPath, "utf8");
+  assert.match(numberingMigration, /CREATE SEQUENCE IF NOT EXISTS order_number_seq AS BIGINT/);
+  assert.match(numberingMigration, /NO CYCLE/);
+  assert.match(numberingMigration, /\^XJ\[0-9\]\+\$/);
+  assert.match(numberingMigration, /is_called/);
+  assert.match(numberingMigration, /VALUES \(8,/);
+  assert.doesNotMatch(numberingMigration, /DROP TABLE|DROP SEQUENCE/);
 });

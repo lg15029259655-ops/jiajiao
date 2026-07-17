@@ -5,6 +5,17 @@ const { validateImportItem } = require("./imports.js");
 
 const PAGE_SIZE = 10;
 const SENSITIVE_AUDIT_FIELDS = new Set(["parentName", "parentPhone", "parentWechat", "internalNote", "rawText", "assignedTeacherContact"]);
+const AUTOMATIC_ORDER_NO_PATTERN = /^XJ\d+$/i;
+
+function assertManualOrderNoAllowed(value, existingOrderNo = "") {
+  const orderNo = String(value || "").trim();
+  if (AUTOMATIC_ORDER_NO_PATTERN.test(orderNo)) {
+    const current = String(existingOrderNo || "").trim();
+    if (current && orderNo.toUpperCase() === current.toUpperCase()) return current;
+    throw domainError("ORDER_NO_RESERVED", "XJ开头的编号由系统自动生成，请使用其他订单号或留空", 400);
+  }
+  return orderNo;
+}
 
 function normalizePage(page) {
   const value = Number(page || 1);
@@ -305,9 +316,7 @@ async function insertImportItems(client, batchId, items) {
 }
 
 async function allocateOrderNo(client) {
-  const sequence = await client.query(`INSERT INTO order_sequences(order_date, last_value) VALUES (current_date, 1)
-    ON CONFLICT (order_date) DO UPDATE SET last_value = order_sequences.last_value + 1
-    RETURNING to_char(order_date, 'YYMMDD') || lpad(last_value::text, 2, '0') AS order_no`);
+  const sequence = await client.query(`SELECT 'XJ' || lpad(nextval('order_number_seq')::text, 10, '0') AS order_no`);
   return sequence.rows[0].order_no;
 }
 
@@ -652,7 +661,8 @@ function createRepository(pool) {
             duplicateCount += 1;
             continue;
           }
-          const orderNo = String(data.orderNo || "").trim() || await allocateOrderNo(client);
+          const requestedOrderNo = assertManualOrderNoAllowed(data.orderNo);
+          const orderNo = requestedOrderNo || await allocateOrderNo(client);
           let inserted;
           try {
             inserted = await client.query(`INSERT INTO orders (
@@ -711,7 +721,7 @@ function createRepository(pool) {
         if (duplicateWarnings.length && input.duplicateConfirmed !== true) {
           throw domainError("ORDER_DUPLICATE_SUSPECTED", `发现疑似重复：${duplicateWarnings.join("、")}`, 409);
         }
-        let orderNo = String(input.orderNo || "").trim();
+        let orderNo = assertManualOrderNoAllowed(input.orderNo);
         if (!orderNo) {
           orderNo = await allocateOrderNo(client);
         }
@@ -724,6 +734,7 @@ function createRepository(pool) {
             parent_wechat, internal_note, raw_text, agent_id, status, review_status, published_at, idempotency_key
           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
             'active','published',now(),$22)
+          ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
           RETURNING *`, [
             orderNo, input.studentGender || null, input.grade.trim(), input.subject.trim(), input.score.trim(), input.lessonTime.trim(),
             input.startTimeText || null, input.lessonFrequency || null, input.lessonDuration || null, input.price.trim(),
@@ -735,6 +746,11 @@ function createRepository(pool) {
         } catch (error) {
           if (error.code === "23505") throw domainError("ORDER_DUPLICATE", "订单号或发布请求已存在", 409);
           throw error;
+        }
+        if (!inserted.rows[0] && input.idempotencyKey) {
+          const existing = await client.query("SELECT o.* FROM orders o WHERE o.idempotency_key = $1 LIMIT 1", [input.idempotencyKey]);
+          if (existing.rows[0]) return mapOrder(existing.rows[0]);
+          throw domainError("ORDER_IDEMPOTENCY_CONFLICT", "发布请求正在处理中，请刷新后查看", 409);
         }
         const order = inserted.rows[0];
         await client.query(`INSERT INTO order_logs (order_id, actor_agent_id, actor_name_snapshot, action, reason, to_status)
@@ -749,6 +765,11 @@ function createRepository(pool) {
         if (!current) throw domainError("ORDER_NOT_FOUND", "订单不存在", 404);
         if (Number(input.version) !== Number(current.version)) throw domainError("ORDER_VERSION_CONFLICT", "订单已被其他人更新，请刷新后重试", 409);
         if (!ACTIVE_STATUSES.includes(current.status)) throw domainError("ORDER_READ_ONLY", "历史订单只读，不能编辑", 409);
+        if (Object.hasOwn(input, "orderNo")) {
+          const orderNo = assertManualOrderNoAllowed(input.orderNo, current.order_no);
+          if (!orderNo) throw domainError("ORDER_NO_REQUIRED", "订单号不能为空", 400);
+          input = { ...input, orderNo };
+        }
         const columnMap = {
           orderNo: "order_no", studentGender: "student_gender", grade: "grade", subject: "subject", score: "score",
           lessonTime: "lesson_time", startTimeText: "start_time_text", lessonFrequency: "lesson_frequency",
@@ -767,8 +788,14 @@ function createRepository(pool) {
         const values = entries.map(([key]) => input[key] === "" ? null : input[key]);
         const assignments = entries.map(([, column], index) => `${column} = $${index + 2}`);
         values.push(Number(current.version));
-        const updated = await client.query(`UPDATE orders SET ${assignments.join(", ")}, version = version + 1, updated_at = now()
-          WHERE id = $1 AND version = $${values.length + 1} RETURNING *`, [orderId, ...values]);
+        let updated;
+        try {
+          updated = await client.query(`UPDATE orders SET ${assignments.join(", ")}, version = version + 1, updated_at = now()
+            WHERE id = $1 AND version = $${values.length + 1} RETURNING *`, [orderId, ...values]);
+        } catch (error) {
+          if (error.code === "23505") throw domainError("ORDER_DUPLICATE", "订单号已存在，请使用其他编号", 409);
+          throw error;
+        }
         if (!updated.rows[0]) throw domainError("ORDER_VERSION_CONFLICT", "订单已被其他人更新，请刷新后重试", 409);
         const changes = Object.fromEntries(entries.map(([key, column], index) => [key,
           SENSITIVE_AUDIT_FIELDS.has(key) ? { changed: current[column] !== values[index] } : { from: current[column], to: values[index] }
@@ -839,7 +866,7 @@ function createRepository(pool) {
 }
 
 module.exports = {
-  PAGE_SIZE, addImportToDuplicateIndex, assertRequiredOrderFields, buildAgentOrderQuery,
+  PAGE_SIZE, addImportToDuplicateIndex, allocateOrderNo, assertManualOrderNoAllowed, assertRequiredOrderFields, buildAgentOrderQuery,
   buildTeacherOrderQuery, createImportDuplicateIndex, createRepository, databaseDuplicateWarnings,
   duplicateWarningsFromIndex, mapAgent, mapImportItem, mapOrder, normalizePage,
   pendingImportItems, placeholders

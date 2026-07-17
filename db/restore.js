@@ -51,6 +51,12 @@ async function restoreIntoSchema(pool, payload, schema) {
         }
       }
     }
+    await client.query(`WITH generated AS (
+      SELECT COALESCE(MAX(substring(order_no FROM 3)::BIGINT), 0) AS max_value
+      FROM orders WHERE order_no ~ '^XJ[0-9]+$'
+    )
+    SELECT setval('order_number_seq', GREATEST(max_value, 1), max_value > 0)
+    FROM generated`);
   });
 }
 

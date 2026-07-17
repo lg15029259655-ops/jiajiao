@@ -97,3 +97,12 @@ test("validation reports all required missing fields", () => {
   assert.ok(result.warnings.some((warning) => warning.includes("科目")));
   assert.ok(result.warnings.some((warning) => warning.includes("地址")));
 });
+
+test("imported rows cannot claim the automatic XJ order number namespace", () => {
+  const result = validateImportItem({
+    orderNo: "XJ0000000123", grade: "初二", subject: "数学", area: "雁塔区",
+    score: "80分", lessonTime: "周末", price: "100元/小时", address: "测试地址"
+  });
+  assert.equal(result.reviewStatus, "needs_review");
+  assert.ok(result.warnings.some((warning) => warning.includes("XJ")));
+});
